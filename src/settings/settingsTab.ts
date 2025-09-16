@@ -1,14 +1,14 @@
 import type cMenuPlugin from "src/plugin/main";
-import { CommandPicker } from "src/modals/suggesterModals";
+import { CommandPicker, MacroPicker } from "src/modals/suggesterModals";
 import { App, Setting, PluginSettingTab } from "obsidian";
-import { APPEND_METHODS, AESTHETIC_STYLES } from "src/settings/settingsData";
+import { AESTHETIC_STYLES, MenuItem, GroupItem, MacroItem } from "src/settings/settingsData";
+import { setBottomValue } from "src/util/statusBarConstants";
 import { selfDestruct, cMenuPopover } from "src/modals/cMenuModal";
 import Sortable from "sortablejs";
 import { debounce } from "obsidian";
 
 export class cMenuSettingTab extends PluginSettingTab {
   plugin: cMenuPlugin;
-  appendMethod: string;
 
   constructor(app: App, plugin: cMenuPlugin) {
     super(app, plugin);
@@ -23,38 +23,49 @@ export class cMenuSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h1", { text: "cMenu" });
-    containerEl.createEl("p", { text: "Created by " }).createEl("a", {
-      text: "Chetachi 👩🏽‍💻",
-      href: "https://github.com/chetachiezikeuzor",
-    });
-    containerEl.createEl("h2", { text: "Plugin Settings" });
-    new Setting(containerEl)
-      .setName("cMenu append method")
-      .setDesc(
-        "Choose where cMenu will append upon regeneration. To see the change, hit the refresh button below, or in the status bar menu."
-      )
-      .addDropdown((dropdown) => {
-        let methods: Record<string, string> = {};
-        APPEND_METHODS.map((method) => (methods[method] = method));
-        dropdown.addOptions(methods);
-        dropdown
-          .setValue(this.plugin.settings.appendMethod)
-          .onChange((appendMethod) => {
-            this.plugin.settings.appendMethod = appendMethod;
-            this.plugin.saveSettings();
-          });
+    containerEl.createEl('h1', { text: 'cMenu 设置' });
+
+    // Tabs skeleton
+    const tabs = containerEl.createDiv({ cls: 'cMenu-settings-tabs' });
+    const header = tabs.createDiv({ cls: 'cMenu-settings-tabs-header' });
+    const body = tabs.createDiv({ cls: 'cMenu-settings-tabs-body' });
+
+    const tabBtns: { key: string; btn: HTMLButtonElement }[] = [];
+    const sections: Record<string, HTMLElement> = {
+      appearance: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      commands: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      about: body.createDiv({ cls: 'cMenu-settings-tab' }),
+    };
+
+    const switchTo = (key: keyof typeof sections) => {
+      Object.entries(sections).forEach(([k, el]) => {
+        if (k === key) el.addClass('is-active'); else el.removeClass('is-active');
       });
-    new Setting(containerEl)
-      .setName("cMenu aesthetic")
-      .setDesc(
-        "Choose between a glass morphism and default style for cMenu. To see the change, hit the refresh button below, or in the status bar menu."
-      )
+      tabBtns.forEach(({ key: k, btn }) => {
+        if (k === key) btn.addClass('is-active'); else btn.removeClass('is-active');
+      });
+    };
+
+    const addTabBtn = (key: keyof typeof sections, label: string) => {
+      const b = header.createEl('button', { text: label, cls: 'cMenu-settings-tab-btn' });
+      b.addEventListener('click', () => switchTo(key));
+      tabBtns.push({ key, btn: b });
+    };
+
+    addTabBtn('appearance', '外观');
+    addTabBtn('commands', '命令与分组');
+    addTabBtn('about', '关于');
+
+    // ========== 外观 ==========
+    const appearanceEl = sections.appearance;
+    appearanceEl.createEl('h3', { text: '外观' });
+
+    new Setting(appearanceEl)
+      .setName('外观风格')
+      .setDesc('在玻璃拟态与默认风格之间切换。更改后可点击下方“刷新 cMenu”。')
       .addDropdown((dropdown) => {
-        let aesthetics: Record<string, string> = {};
-        AESTHETIC_STYLES.map(
-          (aesthetic) => (aesthetics[aesthetic] = aesthetic)
-        );
+        const aesthetics: Record<string, string> = {};
+        AESTHETIC_STYLES.map((aesthetic) => (aesthetics[aesthetic] = aesthetic));
         dropdown.addOptions(aesthetics);
         dropdown
           .setValue(this.plugin.settings.aestheticStyle)
@@ -63,125 +74,388 @@ export class cMenuSettingTab extends PluginSettingTab {
             this.plugin.saveSettings();
           });
       });
-    new Setting(containerEl)
-      .setName("cMenu columns")
-      .setDesc(
-        "Choose the number of columns per row to display on cMenu. To see the change, hit the refresh button below, or in the status bar menu."
-      )
+
+    new Setting(appearanceEl)
+      .setName('按钮间距 (px)')
+      .setDesc('调整 cMenu 按钮的间距。')
       .addSlider((slider) => {
         slider
-          .setLimits(1, 18, 1)
-          .setValue(this.plugin.settings.cMenuNumRows)
+          .setLimits(0, 24, 1)
+          .setValue(this.plugin.settings.cMenuButtonGap)
           .onChange(
-            debounce(
-              async (value) => {
-                this.plugin.settings.cMenuNumRows = value;
-                await this.plugin.saveSettings();
-              },
-              100,
-              true
-            )
+            debounce(async (value: number) => {
+              this.plugin.settings.cMenuButtonGap = value;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+            }, 100, true)
           )
           .setDynamicTooltip();
       });
-    new Setting(containerEl)
-      .setName("cMenu refresh")
-      .setDesc(
-        "cMenu will only refresh automatically after you have either added or deleted a command from it. To see UI changes to cMenu (above settings changes) use the refresh button. If you forget to refresh in settings, no worries. There is also a refresh button in the cMenu status bar menu."
-      )
+
+    new Setting(appearanceEl)
+      .setName('按钮尺寸')
+      .setDesc('缩放 cMenu 按钮整体大小。')
+      .addSlider((slider) => {
+        slider
+          .setLimits(0.75, 1.5, 0.05)
+          .setValue(this.plugin.settings.cMenuButtonScale)
+          .onChange(
+            debounce(async (value: number) => {
+              this.plugin.settings.cMenuButtonScale = value;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    new Setting(appearanceEl)
+      .setName('停靠模式')
+      .setDesc('跟随选区，或固定在编辑器顶部。')
+      .addDropdown((dropdown) => {
+        const options: Record<string, string> = { follow: 'follow', fixed: 'fixed' };
+        dropdown.addOptions(options);
+        dropdown
+          .setValue(this.plugin.settings.cMenuDockMode ?? 'follow')
+          .onChange(
+            debounce(async (value: string) => {
+              this.plugin.settings.cMenuDockMode = (value as any);
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          );
+      });
+
+    new Setting(appearanceEl)
+      .setName('溢出模式')
+      .setDesc('换行（多行）或滚动（单行横向滚动）。')
+      .addDropdown((dropdown) => {
+        const options: Record<string, string> = { wrap: 'wrap', scroll: 'scroll' };
+        dropdown.addOptions(options);
+        dropdown
+          .setValue(this.plugin.settings.cMenuOverflowMode ?? 'wrap')
+          .onChange(
+            debounce(async (value: string) => {
+              this.plugin.settings.cMenuOverflowMode = (value as any);
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+            }, 100, true)
+          );
+      });
+
+    new Setting(appearanceEl)
+      .setName('最大宽度（%）')
+      .setDesc('限制 cMenu 相对编辑器宽度的最大宽度。')
+      .addSlider((slider) => {
+        slider
+          .setLimits(30, 100, 5)
+          .setValue(this.plugin.settings.cMenuMaxWidthPct ?? 100)
+          .onChange(
+            debounce(async (value: number) => {
+              this.plugin.settings.cMenuMaxWidthPct = value;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    new Setting(appearanceEl)
+      .setName('刷新 cMenu')
+      .setDesc('添加/删除命令后会自动刷新。若调整了外观或布局，请手动刷新。')
       .addButton((reloadButton) => {
         reloadButton
-          .setIcon("cMenuReload")
-          .setClass("cMenuSettingsButton")
-          .setClass("cMenuSettingsButtonRefresh")
-          .setTooltip("Refresh")
+          .setIcon('cMenuReload')
+          .setClass('cMenuSettingsButton')
+          .setClass('cMenuSettingsButtonRefresh')
+          .setTooltip('刷新')
           .onClick(() => {
-            setTimeout(() => {
-              dispatchEvent(new Event("cMenu-NewCommand"));
-            }, 100);
-            console.log(`%ccMenu refreshed`, "color: Violet");
+            setTimeout(() => { dispatchEvent(new Event('cMenu-NewCommand')); }, 100);
+            console.log(`%ccMenu refreshed`, 'color: Violet');
           });
       });
-    new Setting(containerEl)
-      .setName("cMenu commands")
-      .setDesc(
-        "Add a command onto cMenu from Obsidian's commands library. To reorder the commands, drag and drop the command items. To delete them, use the delete buttom to the right of the command item. cMenu will not automaticaly refresh after reordering commands. Use the refresh button above."
-      )
+
+    // ========== 命令与分组 ==========
+    const commandsEl = sections.commands;
+    commandsEl.createEl('h3', { text: '命令与分组' });
+
+    new Setting(commandsEl)
+      .setName('管理 cMenu 命令')
+      .setDesc('从命令面板添加命令。拖拽可以排序，右侧按钮可删除项。排序后需手动刷新。')
       .addButton((addButton) => {
         addButton
-          .setIcon("cMenuAdd")
-          .setTooltip("Add")
-          .setClass("cMenuSettingsButton")
-          .setClass("cMenuSettingsButtonAdd")
+          .setIcon('cMenuAdd')
+          .setTooltip('添加命令')
+          .setClass('cMenuSettingsButton')
+          .setClass('cMenuSettingsButtonAdd')
           .onClick(() => {
             new CommandPicker(this.plugin).open();
-            setTimeout(() => {
-              dispatchEvent(new Event("cMenu-NewCommand"));
-            }, 100);
+            setTimeout(() => { dispatchEvent(new Event('cMenu-NewCommand')); }, 100);
+          });
+      })
+      .addButton((addGroupBtn) => {
+        addGroupBtn
+          .setIcon('folder')
+          .setTooltip('添加分组')
+          .setClass('cMenuSettingsButton')
+          .setClass('cMenuSettingsButtonAdd')
+          .onClick(async () => {
+            const group: GroupItem = { type: 'group', name: '新建分组', items: [] };
+            (this.plugin.settings.menuCommands as MenuItem[]).push(group);
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      })
+      .addButton((addMacroBtn) => {
+        addMacroBtn
+          .setIcon('cMenuAdd')
+          .setTooltip('添加宏')
+          .setClass('cMenuSettingsButton')
+          .setClass('cMenuSettingsButtonAdd')
+          .onClick(async () => {
+            const macro: MacroItem = { type: 'macro', name: '新建宏', steps: [] };
+            (this.plugin.settings.menuCommands as MenuItem[]).push(macro);
+            await this.plugin.saveSettings();
+            this.display();
           });
       });
-    const cMenuCommandsContainer = containerEl.createEl("div", {
-      cls: "cMenuSettingsTabsContainer",
-    });
+
+    const cMenuCommandsContainer = commandsEl.createEl('div', { cls: 'cMenuSettingsTabsContainer' });
     Sortable.create(cMenuCommandsContainer, {
       animation: 500,
-      ghostClass: "sortable-ghost",
-      chosenClass: "sortable-chosen",
-      dragClass: "sortable-drag",
+      ghostClass: 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      dragClass: 'sortable-drag',
       dragoverBubble: true,
       forceFallback: true,
-      fallbackClass: "sortable-fallback",
-      easing: "cubic-bezier(1, 0, 0, 1)",
+      fallbackClass: 'sortable-fallback',
+      easing: 'cubic-bezier(1, 0, 0, 1)',
+      filter: '.cMenuSettingsGroupItems, .cMenuSettingsMacroSteps',
       onSort: (command) => {
         const arrayResult = this.plugin.settings.menuCommands;
         const [removed] = arrayResult.splice(command.oldIndex, 1);
         arrayResult.splice(command.newIndex, 0, removed);
         this.plugin.saveSettings();
-        console.log(arrayResult);
       },
     });
-    this.plugin.settings.menuCommands.forEach((newCommand: any) => {
-      const setting = new Setting(cMenuCommandsContainer)
-        .setClass("cMenuCommandItem")
-        .setName(newCommand.name)
-        .addButton((deleteButton) => {
-          deleteButton
-            .setIcon("cMenuDelete")
-            .setTooltip("Delete")
-            .setClass("cMenuSettingsButton")
-            .setClass("cMenuSettingsButtonDelete")
-            .onClick(async () => {
-              this.plugin.settings.menuCommands.remove(newCommand);
+
+    const renderTopLevelItem = (item: MenuItem) => {
+      if ((item as any).type === 'group') {
+        const group = item as GroupItem;
+        new Setting(cMenuCommandsContainer)
+          .setClass('cMenuCommandItem')
+          .setName(group.name)
+          .setDesc('分组')
+          .addText((t) => {
+            t.setPlaceholder('分组名称').setValue(group.name).onChange(async (v) => {
+              group.name = v || '分组';
               await this.plugin.saveSettings();
-              this.display();
-              setTimeout(() => {
-                dispatchEvent(new Event("cMenu-NewCommand"));
-              }, 100);
-              console.log(
-                `%cCommand '${newCommand.name}' was removed from cMenu`,
-                "color: #989cab"
-              );
+            });
+          })
+          .addButton((addToGroupBtn) => {
+            addToGroupBtn
+              .setIcon('cMenuAdd')
+              .setTooltip('向分组添加命令')
+              .setClass('cMenuSettingsButton')
+              .setClass('cMenuSettingsButtonAdd')
+              .onClick(() => {
+                new CommandPicker(this.plugin, async (cmd) => {
+                  group.items.push(cmd as any);
+                  await this.plugin.saveSettings();
+                  this.display();
+                  setTimeout(() => dispatchEvent(new Event('cMenu-NewCommand')), 100);
+                }).open();
+              });
+          })
+          .addButton((addMacroToGroupBtn) => {
+            addMacroToGroupBtn
+              .setIcon('bot-glyph')
+              .setTooltip('向分组添加宏')
+              .setClass('cMenuSettingsButton')
+              .setClass('cMenuSettingsButtonAdd')
+              .onClick(() => {
+                new MacroPicker(this.plugin, async (macro) => {
+                  group.items.push(macro as any);
+                  await this.plugin.saveSettings();
+                  this.display();
+                  setTimeout(() => dispatchEvent(new Event('cMenu-NewCommand')), 100);
+                }).open();
+              });
+          })
+          .addButton((deleteButton) => {
+            deleteButton
+              .setIcon('cMenuDelete')
+              .setTooltip('删除分组')
+              .setClass('cMenuSettingsButton')
+              .setClass('cMenuSettingsButtonDelete')
+              .onClick(async () => {
+                this.plugin.settings.menuCommands.remove(item as any);
+                await this.plugin.saveSettings();
+                this.display();
+                setTimeout(() => dispatchEvent(new Event('cMenu-NewCommand')), 100);
+              });
+          });
+
+        const childContainer = cMenuCommandsContainer.createEl('div', { cls: 'cMenuSettingsGroupItems' });
+        group.items.forEach((child: any) => {
+          new Setting(childContainer)
+            .setClass('cMenuCommandItem')
+            .setName(child.name)
+            .setDesc('分组内')
+            .addButton((deleteChild) => {
+              deleteChild
+                .setIcon('cMenuDelete')
+                .setTooltip('从分组移除')
+                .setClass('cMenuSettingsButton')
+                .setClass('cMenuSettingsButtonDelete')
+                .onClick(async () => {
+                  group.items.remove(child);
+                  await this.plugin.saveSettings();
+                  this.display();
+                  setTimeout(() => dispatchEvent(new Event('cMenu-NewCommand')), 100);
+                });
             });
         });
-      setting.nameEl;
-    });
-    const cDonationDiv = containerEl.createEl("div", {
-      cls: "cDonationSection",
-    });
 
-    const credit = createEl("p");
-    const donateText = createEl("p");
-    donateText.appendText(
-      "If you like this Plugin and are considering donating to support continued development, use the button below!"
-    );
-    credit.appendText("Created with ❤️ by Chetachi");
-    credit.setAttribute("style", "color: var(--text-muted)");
-    cDonationDiv.appendChild(donateText);
-    cDonationDiv.appendChild(credit);
+        Sortable.create(childContainer, {
+          animation: 300,
+          ghostClass: 'sortable-ghost',
+          group: { name: 'cMenu-group', pull: false, put: false },
+          onSort: (evt) => {
+            const arr = group.items as any[];
+            const [removed] = arr.splice(evt.oldIndex, 1);
+            arr.splice(evt.newIndex, 0, removed);
+            this.plugin.saveSettings();
+          },
+        });
+        return;
+      }
 
-    cDonationDiv.appendChild(
-      createDonateButton("https://www.buymeacoffee.com/chetachi")
-    );
+      if ((item as any).type === 'macro') {
+        const macro = item as MacroItem;
+        new Setting(cMenuCommandsContainer)
+          .setClass('cMenuCommandItem')
+          .setName(macro.name)
+          .setDesc('宏')
+          .addText((t) => {
+            t.setPlaceholder('宏名称').setValue(macro.name).onChange(async (v) => {
+              macro.name = v || '宏';
+              await this.plugin.saveSettings();
+            });
+          })
+          .addButton((addStepBtn) => {
+            addStepBtn
+              .setIcon('cMenuAdd')
+              .setTooltip('添加步骤')
+              .setClass('cMenuSettingsButton')
+              .setClass('cMenuSettingsButtonAdd')
+              .onClick(() => {
+                new CommandPicker(this.plugin, async (cmd) => {
+                  macro.steps.push({ id: (cmd as any).id, delayMs: 0 });
+                  await this.plugin.saveSettings();
+                  this.display();
+                  setTimeout(() => dispatchEvent(new Event('cMenu-NewCommand')), 100);
+                }).open();
+              });
+          })
+          .addButton((deleteMacroBtn) => {
+            deleteMacroBtn
+              .setIcon('cMenuDelete')
+              .setTooltip('删除宏')
+              .setClass('cMenuSettingsButton')
+              .setClass('cMenuSettingsButtonDelete')
+              .onClick(async () => {
+                this.plugin.settings.menuCommands.remove(item as any);
+                await this.plugin.saveSettings();
+                this.display();
+                setTimeout(() => dispatchEvent(new Event('cMenu-NewCommand')), 100);
+              });
+          });
+
+        const stepsContainer = cMenuCommandsContainer.createEl('div', { cls: 'cMenuSettingsMacroSteps' });
+        const allCommands = (this.app as any).commands?.listCommands?.() ?? [];
+        const getNameById = (id: string) => (allCommands.find((c: any) => c.id === id)?.name) || id;
+        macro.steps.forEach((step, idx) => {
+          new Setting(stepsContainer)
+            .setClass('cMenuCommandItem')
+            .setName(getNameById(step.id))
+            .setDesc('延迟 (ms)')
+            .addSlider((slider) => {
+              slider
+                .setLimits(0, 3000, 50)
+                .setValue(Number.isFinite(step.delayMs as any) ? (step.delayMs as number) : 0)
+                .onChange(
+                  debounce(async (value: number) => {
+                    step.delayMs = value;
+                    await this.plugin.saveSettings();
+                  }, 100, true)
+                )
+                .setDynamicTooltip();
+            })
+            .addButton((deleteStepBtn) => {
+              deleteStepBtn
+                .setIcon('cMenuDelete')
+                .setTooltip('移除步骤')
+                .setClass('cMenuSettingsButton')
+                .setClass('cMenuSettingsButtonDelete')
+                .onClick(async () => {
+                  macro.steps.splice(idx, 1);
+                  await this.plugin.saveSettings();
+                  this.display();
+                });
+            });
+        });
+
+        Sortable.create(stepsContainer, {
+          animation: 300,
+          ghostClass: 'sortable-ghost',
+          group: { name: 'cMenu-macro', pull: false, put: false },
+          onSort: (evt) => {
+            const arr = macro.steps as any[];
+            const [removed] = arr.splice(evt.oldIndex, 1);
+            arr.splice(evt.newIndex, 0, removed);
+            this.plugin.saveSettings();
+          },
+        });
+        return;
+      }
+
+      // 常规命令项
+      new Setting(cMenuCommandsContainer)
+        .setClass('cMenuCommandItem')
+        .setName((item as any).name)
+        .addButton((deleteButton) => {
+          deleteButton
+            .setIcon('cMenuDelete')
+            .setTooltip('删除')
+            .setClass('cMenuSettingsButton')
+            .setClass('cMenuSettingsButtonDelete')
+            .onClick(async () => {
+              this.plugin.settings.menuCommands.remove(item as any);
+              await this.plugin.saveSettings();
+              this.display();
+              setTimeout(() => { dispatchEvent(new Event('cMenu-NewCommand')); }, 100);
+            });
+        });
+    };
+
+    (this.plugin.settings.menuCommands as MenuItem[]).forEach(renderTopLevelItem);
+
+    // ========== 关于 ==========
+    const aboutEl = sections.about;
+    aboutEl.createEl('h3', { text: '关于' });
+    const meta = aboutEl.createEl('div', { cls: 'cMenu-about' });
+    meta.createEl('p', { text: `版本：v${this.plugin.manifest.version}` });
+    const creditP = meta.createEl('p');
+    creditP.appendText('作者：');
+    creditP.createEl('a', { text: 'Chetachi', href: 'https://github.com/chetachiezikeuzor' });
+    meta.createEl('p', { text: '如果你喜欢这个插件并希望支持持续开发，可以点击下方按钮赞助。' });
+    aboutEl.appendChild(createDonateButton('https://www.buymeacoffee.com/chetachi'));
+
+    // 默认选中第一个标签页
+    const firstKey = Object.keys(sections)[0] as keyof typeof sections;
+    switchTo(firstKey);
   }
 }
 

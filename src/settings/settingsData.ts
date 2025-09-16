@@ -1,15 +1,34 @@
 import type { Command } from "obsidian";
-export const APPEND_METHODS = ["body", "workspace"];
 export const AESTHETIC_STYLES = ["glass", "default"];
+
+// Menu item union type to support plain commands, groups (submenus), and macros
+export type CommandItem = Command & { type?: undefined };
+export type GroupItem = {
+  type: "group";
+  name: string;
+  icon?: string;
+  items: MenuItem[];
+};
+export type MacroItem = {
+  type: "macro";
+  name: string;
+  icon?: string;
+  steps: Array<{ id: string; delayMs?: number }>;
+};
+export type MenuItem = CommandItem | GroupItem | MacroItem;
 
 export interface cMenuSettings {
   aestheticStyle: string;
-  menuCommands: Command[];
-  appendMethod: string;
-  shouldShowMenuOnSelect: boolean;
+  // Upgraded: support command/group/macro
+  menuCommands: MenuItem[];
   cMenuVisibility: boolean;
   cMenuBottomValue: number;
-  cMenuNumRows: number;
+  cMenuButtonGap: number; // px
+  cMenuButtonScale: number; // em multiplier
+  // Phase 1 additions
+  cMenuDockMode?: 'follow' | 'fixed';
+  cMenuOverflowMode?: 'wrap' | 'scroll';
+  cMenuMaxWidthPct?: number; // 30-100
 }
 
 export const DEFAULT_SETTINGS: cMenuSettings = {
@@ -61,9 +80,12 @@ export const DEFAULT_SETTINGS: cMenuSettings = {
       icon: "quote-glyph",
     },
   ],
-  appendMethod: "workspace",
-  shouldShowMenuOnSelect: false,
   cMenuVisibility: true,
-  cMenuBottomValue: 4.25,
-  cMenuNumRows: 9,
+  cMenuBottomValue: 8,
+  cMenuButtonGap: 6,
+  cMenuButtonScale: 1.0,
+  // Phase 1 defaults
+  cMenuDockMode: 'follow',
+  cMenuOverflowMode: 'wrap',
+  cMenuMaxWidthPct: 100,
 };

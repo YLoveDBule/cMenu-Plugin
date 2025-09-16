@@ -8,6 +8,7 @@ import {
   MarkdownView,
   SliderComponent,
   ToggleComponent,
+  DropdownComponent,
   ButtonComponent,
   App,
 } from "obsidian";
@@ -16,7 +17,7 @@ import { appIcons } from "src/icons/appIcons";
 import { CommandPicker } from "src/modals/suggesterModals";
 import { cMenuSettingTab } from "src/settings/settingsTab";
 import { selfDestruct, cMenuPopover } from "src/modals/cMenuModal";
-import { cMenuSettings, DEFAULT_SETTINGS } from "src/settings/settingsData";
+import { cMenuSettings, DEFAULT_SETTINGS, MenuItem } from "src/settings/settingsData";
 import addIcons, {
   addFeatherIcons,
   addRemixIcons,
@@ -252,64 +253,83 @@ export default class cMenuPlugin extends Plugin {
     });
   }
 
-  setupStatusBar() {
+  setupStatusBar(): void {
+    // If host has no status bar, skip creating the status bar menu entirely
+    const statusBarEl = document.querySelector(".status-bar");
+    if (!statusBarEl) return;
+
     this.statusBarIcon = this.addStatusBarItem();
-    this.statusBarIcon.addClass("cMenu-statusbar-button");
+    this.statusBarIcon.addClass("cMenu-statusbar-icon");
     setIcon(this.statusBarIcon, "cMenu");
 
-    this.registerDomEvent(this.statusBarIcon, "click", () => {
-      const statusBarRect =
-        this.statusBarIcon.parentElement.getBoundingClientRect();
-      const statusBarIconRect = this.statusBarIcon.getBoundingClientRect();
+    this.statusBarIcon.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
 
-      const menu = new Menu(this.app).addItem((item) => {
-        item.setTitle("Hide & Show");
-
-        const itemDom = (item as any).dom as HTMLElement;
-        const toggleComponent = new ToggleComponent(itemDom)
-          .setValue(this.settings.cMenuVisibility)
-          .setDisabled(true);
-
-        const toggle = async () => {
-          this.settings.cMenuVisibility = !this.settings.cMenuVisibility;
-          toggleComponent.setValue(this.settings.cMenuVisibility);
-          this.settings.cMenuVisibility == true
-            ? setTimeout(() => {
-                dispatchEvent(new Event("cMenu-NewCommand"));
-              }, 100)
-            : setMenuVisibility(this.settings.cMenuVisibility);
-          selfDestruct();
-          await this.saveSettings();
-        };
-
-        item.onClick((e) => {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          toggle();
-        });
-      });
-
+      const menu = new Menu();
       const menuDom = (menu as any).dom as HTMLElement;
       menuDom.addClass("cMenu-statusbar-menu");
 
-      const item = menuDom.createDiv("menu-item");
-      item.createDiv({ cls: "menu-item-icon" });
-      item.createDiv({ text: "Bottom", cls: "menu-item-title" });
-      item.onClickEvent((e) => e.stopPropagation());
+      // Visibility toggle
+      const toggleItem = menuDom.createDiv({ cls: "menu-item" });
+      toggleItem.createDiv({ cls: "menu-item-icon" });
+      toggleItem.createDiv({ text: "Hide & Show", cls: "menu-item-title" });
+      toggleItem.onClickEvent((e) => e.stopPropagation());
+      new ToggleComponent(toggleItem)
+        .setValue(this.settings.cMenuVisibility)
+        .onChange(async (value) => {
+          this.settings.cMenuVisibility = value;
+          if (value) {
+            setTimeout(() => {
+              dispatchEvent(new Event("cMenu-NewCommand"));
+            }, 100);
+          } else {
+            setMenuVisibility(value);
+          }
+          selfDestruct();
+          await this.saveSettings();
+        });
 
-      new SliderComponent(item)
-        .setLimits(2, 18, 0.25)
+      // Dock mode (follow | fixed)
+      const dockItem = menuDom.createDiv({ cls: "menu-item" });
+      dockItem.createDiv({ cls: "menu-item-icon" });
+      dockItem.createDiv({ text: "Dock mode", cls: "menu-item-title" });
+      dockItem.onClickEvent((e) => e.stopPropagation());
+      new DropdownComponent(dockItem)
+        .addOptions({ follow: "follow", fixed: "fixed" })
+        .setValue(this.settings.cMenuDockMode ?? "follow")
+        .onChange(
+          debounce(
+            async (value: string) => {
+              // Update setting and re-apply layout + reposition
+              // @ts-ignore narrow string type
+              this.settings.cMenuDockMode = value as any;
+              setBottomValue(this.settings);
+              await this.saveSettings();
+              document.dispatchEvent(new Event("selectionchange"));
+            },
+            100,
+            true
+          )
+        );
+
+      // Bottom slider
+      const bottomItem = menuDom.createDiv({ cls: "menu-item" });
+      bottomItem.createDiv({ cls: "menu-item-icon" });
+      bottomItem.createDiv({ text: "Offset (px)", cls: "menu-item-title" });
+      bottomItem.onClickEvent((e) => e.stopPropagation());
+      new SliderComponent(bottomItem)
+        .setLimits(0, 24, 1)
         .setValue(this.settings.cMenuBottomValue)
         .onChange(
           debounce(
-            async (value) => {
-              console.log(`%c${value}em`, "color: Violet");
+            async (value: number) => {
               this.settings.cMenuBottomValue = value;
-              setBottomValue(
-                this.settings.cMenuBottomValue,
-                this.settings.cMenuNumRows
-              );
+              // Re-apply layout using current settings (gap/scale/auto-cols)
+              setBottomValue(this.settings);
               await this.saveSettings();
+              // Trigger selection handler to recompute positioning immediately
+              document.dispatchEvent(new Event("selectionchange"));
             },
             100,
             true
@@ -317,10 +337,11 @@ export default class cMenuPlugin extends Plugin {
         )
         .setDynamicTooltip();
 
+      // Buttons
       const buttonItem = menuDom.createDiv({ cls: "menu-item buttonitem" });
       const addButton = new ButtonComponent(buttonItem);
-      const deleteButton = new ButtonComponent(buttonItem);
       const refreshButton = new ButtonComponent(buttonItem);
+
       addButton
         .setIcon("cMenuAdd")
         .setClass("cMenuSettingsButton")
@@ -330,35 +351,23 @@ export default class cMenuPlugin extends Plugin {
         .onClick(() => {
           new CommandPicker(this).open();
         });
-      this.settings.menuCommands.forEach((newCommand) => {
-        deleteButton
-          .setIcon("cMenuDelete")
-          .setClass("cMenuSettingsButton")
-          .setClass("cMenuSettingsButtonDelete")
-          .setTooltip("Delete")
-          .onClick(async () => {
-            this.settings.menuCommands.remove(newCommand);
-            await this.saveSettings();
-            setTimeout(() => {
-              dispatchEvent(new Event("cMenu-NewCommand"));
-            }, 100);
-            console.log(
-              `%cCommand '${newCommand.name}' was removed from cMenu`,
-              "color: #989cab"
-            );
-          });
-      });
+
       refreshButton
         .setIcon("cMenuReload")
         .setClass("cMenuSettingsButton")
         .setClass("cMenuSettingsButtonRefresh")
         .setTooltip("Refresh")
-        .onClick(async () => {
+        .onClick(() => {
           setTimeout(() => {
             dispatchEvent(new Event("cMenu-NewCommand"));
           }, 100);
-          console.log(`%ccMenu refreshed`, "color: Violet");
         });
+
+      const statusBarIconRect = this.statusBarIcon.getBoundingClientRect();
+      const statusBarRect =
+        document.querySelector(".status-bar")?.getBoundingClientRect() ??
+        statusBarIconRect;
+
       menu.showAtPosition({
         x: statusBarIconRect.right + 5,
         y: statusBarRect.top - 5,
@@ -370,6 +379,19 @@ export default class cMenuPlugin extends Plugin {
     selfDestruct();
     console.log("cMenu unloaded");
     this.app.workspace.off("active-leaf-change", this.handlecMenu);
+    // Clean up global selectionchange listener if installed
+    const ref = (window as any).__cMenuSelectionHandlerRef as EventListener | undefined;
+    if (ref) {
+      document.removeEventListener("selectionchange", ref);
+      (window as any).__cMenuSelectionHandlerInstalled = false;
+      (window as any).__cMenuSelectionHandlerRef = undefined;
+    }
+    // Clean up ResizeObserver if installed
+    const ro = (window as any).__cMenuResizeObserverRef as ResizeObserver | undefined;
+    if (ro) {
+      try { ro.disconnect(); } catch(_) {}
+      (window as any).__cMenuResizeObserverRef = undefined;
+    }
   }
 
   handlecMenu = (): void => {
@@ -379,7 +401,31 @@ export default class cMenuPlugin extends Plugin {
   };
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const raw = await this.loadData();
+    const merged: cMenuSettings = Object.assign({}, DEFAULT_SETTINGS, raw || {});
+    // One-time migration: normalize menuCommands to MenuItem[]
+    const normalize = (items: any[]): MenuItem[] => {
+      if (!Array.isArray(items)) return DEFAULT_SETTINGS.menuCommands.slice();
+      const out: MenuItem[] = [];
+      for (const it of items) {
+        if (!it || typeof it !== 'object') continue;
+        const t = (it as any).type;
+        if (t === 'group' && Array.isArray((it as any).items)) {
+          // Shallow validate children recursively
+          const groupItems = normalize((it as any).items);
+          out.push({ type: 'group', name: (it as any).name ?? 'Group', icon: (it as any).icon, items: groupItems });
+        } else if (t === 'macro' && Array.isArray((it as any).steps)) {
+          const steps = ((it as any).steps as any[]).filter(s => s && typeof s.id === 'string').map(s => ({ id: s.id as string, delayMs: Number.isFinite(s.delayMs) ? s.delayMs : undefined }));
+          out.push({ type: 'macro', name: (it as any).name ?? 'Macro', icon: (it as any).icon, steps });
+        } else if (typeof (it as any).id === 'string' && typeof (it as any).name === 'string') {
+          // Plain command item (backward compatible)
+          out.push({ ...(it as any) });
+        }
+      }
+      return out;
+    };
+    merged.menuCommands = normalize((merged as any).menuCommands);
+    this.settings = merged;
   }
 
   async saveSettings() {

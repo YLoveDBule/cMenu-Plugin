@@ -89,11 +89,23 @@ With cMenu, you can change the design aesthetic. Glass morphism is a pretty popu
 
 ## cMenu Status Bar Menu
 
-With the new [1.1.0](https://github.com/chetachiezikeuzor/cMenu-Plugin/releases/tag/1.1.0) update, you can control to bottom value of cMenu, as well as toggle to hide cMenu and add/delete new command items. The delete button will remove the most recently added command.
+With the new [1.1.0](https://github.com/chetachiezikeuzor/cMenu-Plugin/releases/tag/1.1.0) update, you can control the Offset (px) of cMenu (distance from text selection), as well as toggle to hide cMenu and add/delete new command items. The delete button will remove the most recently added command.
 
 ![](https://raw.githubusercontent.com/chetachiezikeuzor/cMenu-Plugin/master/assets/cMenu%20status%20bar%20menu.gif)
 
 ![](https://raw.githubusercontent.com/chetachiezikeuzor/cMenu-Plugin/master/assets/cMenu.png)
+
+## New Layout & Settings (Refactor)
+
+The menu layout has been refined to be more compact and adaptive. Key changes:
+
+- Button gap (px): Controls spacing between buttons. Implemented via CSS grid gap for consistent layout.
+- Button size: Scales overall button size by changing the menu's font-size (buttons inherit font-size).
+- Offset (px): Vertical gap between the menu and the current selection. Status bar slider label updated to “Offset (px)”, range 0–24, step 1.
+- Dynamic columns: The number of columns is computed automatically based on available editor width, button size, and command count. The old fixed “columns per row” setting has been removed to prevent trailing empty space.
+- Styling: Button margins are removed; spacing is handled exclusively by grid gap for predictable wrapping.
+
+These settings apply immediately; adjustments reflow the menu without leaving empty trailing columns.
 
 ## Installation
 
@@ -215,11 +227,11 @@ This plugin is now available in the community plugin store. You can install it f
   - [x] Choose icons for commands without
 - [x] [Modify](https://github.com/chetachiezikeuzor/cMenu-Plugin/issues/11#issue-973612232) text editing commands
   - [x] Maintain focus in editor
-- [x] Change cMenu [bottom value](https://www.reddit.com/r/ObsidianMD/comments/owlaaf/new_obsidian_plugin_cmenu/h8vkn0v?utm_source=share&utm_medium=web2x&context=3)
+- [x] Change cMenu offset (px)
 - [x] [Hide/show](https://github.com/chetachiezikeuzor/cMenu-Plugin/issues/10#issue-971519914) cMenu
 - [x] Add more command icons (Remix Icons)
-- [x] Custom cMenu columns
-  - [x] Setting to customize cMenu columns (control number of command buttons per row on cMenu)
+- [x] Dynamic columns
+  - [x] Automatically compute columns based on available width and command count (removed fixed columns setting)
 - [x] Reload cMenu
   - [x] Add reload after new command added and command deletion functions.
   - [x] Add general reload button (runs reload function)

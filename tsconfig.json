@@ -5,7 +5,7 @@
       "src": ["src/*"]
     },
     "module": "ESNext",
-    "target": "es6",
+    "target": "ES2020",
     "jsx": "react",
     "allowJs": true,
     "noImplicitAny": true,
@@ -15,8 +15,10 @@
     "inlineSources": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"],
-    "lib": ["dom", "es5", "scripthost", "es2015"]
+    "types": ["node", "obsidian"],
+    "lib": ["DOM", "ES2020"],
+    "skipLibCheck": true,
+    "useDefineForClassFields": false
   },
   "include": ["**/*.ts", "main.js/*"],
   "exclude": ["node_modules/*"]

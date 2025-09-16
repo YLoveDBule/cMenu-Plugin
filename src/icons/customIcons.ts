@@ -1,6 +1,6 @@
 import * as featherIcons from "feather-icons";
-import * as remixicons from "react-icons/ri/";
-import * as boxicons from "react-icons/bi/";
+import * as remixicons from "react-icons/ri";
+import * as boxicons from "react-icons/bi";
 import { renderToString } from "react-dom/server";
 import { addIcon } from "obsidian";
 

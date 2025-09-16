@@ -12,24 +12,25 @@ CMENU TOOLBAR
   position: absolute;
   transition: 200ms ease;
   min-width: fit-content;
-  justify-content: space-around;
+  justify-content: start;
+  gap: 6px;
   z-index: var(--layer-status-bar);
   box-shadow: 0px 3px 32px rgb(31 38 135 / 15%);
   border: 1px solid var(--background-modifier-border);
+  /* Improve scroll experience when overflow mode is scroll */
+  -webkit-overflow-scrolling: touch;
 }
 
 #cMenuModalBar .cMenuCommandItem {
-  margin: 2px;
+  margin: 0;
   border: none;
   display: flex;
   cursor: pointer;
   padding: 5px 6px;
   box-shadow: none;
-  margin-left: 3px;
-  margin-right: 3px;
   position: relative;
   border-radius: 3px;
-  font-size: initial !important;
+  font-size: inherit !important;
   background-color: var(--background-primary-alt);
 }
 
@@ -37,9 +38,23 @@ CMENU TOOLBAR
   background-color: var(--background-secondary);
 }
 
+/* Visible focus for keyboard navigation */
+#cMenuModalBar button.cMenuCommandItem:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
 #cMenuModalBar button.cMenuCommandItem svg {
   width: 1.3em;
   height: 1.3em;
+}
+
+/* Submenu container for group items */
+.cMenuSubmenu {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0px 3px 32px rgb(31 38 135 / 15%);
+  background-color: var(--background-primary);
 }
 
 /*----------------------------------------------------------------
@@ -117,6 +132,20 @@ CMENU SETTING ITEMS
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
+/* Group children in settings UI */
+.cMenuSettingsGroupItems {
+  margin-left: 18px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--background-modifier-border);
+}
+
+/* Macro steps container in settings UI */
+.cMenuSettingsMacroSteps {
+  margin-left: 18px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--background-modifier-border);
+}
+
 /*----------------------------------------------------------------
 CMENU CLASS CHANGES
 ----------------------------------------------------------------*/
@@ -143,6 +172,123 @@ CMENU ICONS
 .cMenuIconPick svg {
   width: 17px;
   height: 17px;
+}
+
+/*----------------------------------------------------------------
+CMENU SETTINGS TABS (便签页) & COMMANDS LAYOUT
+----------------------------------------------------------------*/
+
+/* Tabs container */
+.cMenu-settings-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Tab header (buttons row) */
+.cMenu-settings-tabs-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Tab button */
+.cMenu-settings-tab-btn {
+  appearance: none;
+  padding: 6px 10px;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--background-modifier-border);
+  border-bottom: none;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.cMenu-settings-tab-btn.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+/* Tab body area */
+.cMenu-settings-tabs-body {
+  position: relative;
+}
+
+/* Each tab content as a note-like card */
+.cMenu-settings-tab {
+  display: none;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 0 8px 8px 8px;
+  padding: 12px 14px;
+  background: var(--background-primary);
+  box-shadow: 0 3px 18px rgba(31, 38, 135, 0.08);
+  position: relative;
+}
+
+.cMenu-settings-tab.is-active {
+  display: block;
+}
+
+/* Little folded-corner accent */
+.cMenu-settings-tab::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-width: 0 14px 14px 0;
+  border-style: solid;
+  border-color: transparent var(--background-modifier-border) transparent transparent;
+  border-radius: 0 8px 0 0;
+  opacity: 0.6;
+}
+
+/* Commands & Groups list tidy-up */
+.cMenuSettingsTabsContainer {
+  margin-top: 8px;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cMenuSettingsTabsContainer .setting-item {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--background-modifier-border);
+  align-items: center;
+}
+
+.cMenuSettingsTabsContainer .setting-item:last-child {
+  border-bottom: none;
+}
+
+.cMenuSettingsTabsContainer .setting-item .setting-item-info {
+  margin-right: 8px;
+}
+
+.cMenuSettingsTabsContainer .setting-item .setting-item-control {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Nested lists (group children / macro steps) */
+.cMenuSettingsGroupItems,
+.cMenuSettingsMacroSteps {
+  margin: 6px 0 10px 18px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--background-modifier-border);
+}
+
+/* Smaller buttons in settings */
+.modal.mod-settings button.cMenuSettingsButton {
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+/* Filter buttons in CommandPicker */
+button.cMenu-filter-btn {
+  font-size: 12px;
 }
 
 /*----------------------------------------------------------------
