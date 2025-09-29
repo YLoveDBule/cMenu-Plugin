@@ -63,7 +63,10 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
 
         const menuWidth = cMenu.offsetWidth;
         const menuHeight = cMenu.offsetHeight;
-        const GAP = Number(settings.cMenuBottomValue) || 0; // configurable gap from selection
+        const rawGap = Number(settings.cMenuBottomValue);
+        const GAP = Number.isFinite(rawGap) ? rawGap : 0; // configurable gap from selection
+        const FOLLOW_GAP = Math.max(GAP, 6); // minimal breathing room for normal selections
+        const TABLE_GAP = Math.max(GAP, 10); // stronger breathing room in tables
 
         // Determine editor bounds: prefer container closest to selection anchor
         const mdView = app.workspace.getActiveViewOfType(MarkdownView);
@@ -79,6 +82,16 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
           || contentRoot
           || document.body;
         const boundsRect = editorBoundsEl.getBoundingClientRect();
+        // Detect if selection is inside a Markdown table (Live Preview / Preview)
+        const tableLike = anchorEl
+          ? (anchorEl.closest('table, .markdown-rendered table, .cm-table, .HyperMD-table') as HTMLElement | null)
+          : null;
+        const tableCell = anchorEl
+          ? (anchorEl.closest('td, th, .cm-table-cell, .HyperMD-table-cell') as HTMLElement | null)
+          : null;
+        const inTable = !!tableLike;
+        const tableRect = (tableCell ?? tableLike)?.getBoundingClientRect();
+        const tableBoxRect = tableLike?.getBoundingClientRect();
 
         let vpLeft = 0;
         let vpTop = 0;
@@ -101,21 +114,110 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
             }
           } catch (_) {}
           vpLeft = startX;
-          const availableAbove = rect.top - boundsRect.top;
-          const availableBelow = boundsRect.bottom - rect.bottom;
-          const placeBelow = availableAbove < (menuHeight + GAP) && availableBelow >= (menuHeight + GAP);
-          vpTop = placeBelow ? (rect.bottom + GAP) : (rect.top - menuHeight - GAP);
+          const target = (tableRect ?? rect);
+          const gapUsed = inTable ? TABLE_GAP : FOLLOW_GAP;
+          let tightVertical = false; // 表格內是否上下空間都不足
+          if (inTable) {
+            // 表格內：以選區rect為基準，垂直上方優先，否則下方；上下都不足時選重疊更小的一側
+            const minX = boundsRect.left + GAP;
+            const maxX = boundsRect.right - menuWidth - GAP;
+            const minY = boundsRect.top + TABLE_GAP;
+            const maxY = boundsRect.bottom - menuHeight - TABLE_GAP;
+            const clampX = (x: number) => Math.max(minX, Math.min(x, maxX));
+            const clampY = (y: number) => Math.max(minY, Math.min(y, maxY));
+            const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, 6); // 讓上方更貼近選區
+
+            // 水平位置：對齊選區居中
+            const centerX = target.left + Math.max(0, (target.width - menuWidth) / 2);
+            vpLeft = clampX(centerX);
+
+            const availableAbove = target.top - boundsRect.top;
+            const availableBelow = boundsRect.bottom - target.bottom;
+            const canAbove = availableAbove >= (menuHeight + TABLE_GAP);
+            const canBelow = availableBelow >= (menuHeight + TABLE_GAP);
+            if (canAbove) {
+              vpTop = clampY(target.top - menuHeight - TABLE_GAP_ABOVE);
+            } else if (canBelow) {
+              vpTop = clampY(target.bottom + TABLE_GAP);
+            } else {
+              // 極端狀況：上下皆不足，選擇重疊較小的一側（仍保持上下擺放，不側向）
+              const tryAbove = clampY(target.top - menuHeight - TABLE_GAP_ABOVE);
+              const tryBelow = clampY(target.bottom + TABLE_GAP);
+              const overlapAbove = Math.max(0, (tryAbove + menuHeight) - target.top);
+              const overlapBelow = Math.max(0, target.bottom - tryBelow);
+              vpTop = overlapAbove <= overlapBelow ? tryAbove : tryBelow;
+            }
+          } else {
+            // Non-table: original above/below heuristic
+            const availableAbove = target.top - boundsRect.top;
+            const availableBelow = boundsRect.bottom - target.bottom;
+            const placeBelow = availableAbove < (menuHeight + FOLLOW_GAP) && availableBelow >= (menuHeight + FOLLOW_GAP);
+            vpTop = placeBelow ? (target.bottom + FOLLOW_GAP) : (target.top - menuHeight - FOLLOW_GAP);
+          }
         }
 
-        // Clamp horizontally within editor bounds
-        const minLeft = boundsRect.left + GAP;
-        const maxLeft = boundsRect.right - menuWidth - GAP;
+        // Clamp horizontally; 在表格且過窄時改用容器邊界允許越界編輯區
+        const containerRect = (cMenu.parentElement?.getBoundingClientRect()) || document.body.getBoundingClientRect();
+        const tooWideForBounds = inTable && (menuWidth + 2 * GAP > boundsRect.width);
+        const minLeft = (tooWideForBounds ? containerRect.left : boundsRect.left) + GAP;
+        const maxLeft = (tooWideForBounds ? containerRect.right : boundsRect.right) - menuWidth - GAP;
         vpLeft = Math.max(minLeft, Math.min(vpLeft, maxLeft));
 
-        // Clamp vertically within editor bounds
-        const minTop = boundsRect.top + GAP;
-        const maxTop = boundsRect.bottom - menuHeight - GAP;
+        // Clamp vertically; 表格且上下皆不足時改用容器邊界允許越界編輯區
+        const activeGap = (settings.cMenuDockMode ?? 'follow') === 'fixed' ? GAP : (inTable ? TABLE_GAP : FOLLOW_GAP);
+        const targetY = (tableRect ?? rect);
+        const needContainerY = !!(inTable && targetY &&
+          ((targetY.top - boundsRect.top) < (menuHeight + TABLE_GAP)) &&
+          ((boundsRect.bottom - targetY.bottom) < (menuHeight + TABLE_GAP)));
+        const useContainerY = needContainerY;
+        const minTop = (useContainerY ? containerRect.top : boundsRect.top) + activeGap;
+        const maxTop = (useContainerY ? containerRect.bottom : boundsRect.bottom) - menuHeight - activeGap;
+        const beforeClampTop = vpTop;
         vpTop = Math.max(minTop, Math.min(vpTop, maxTop));
+
+        // Final collision check with selection/cell; try to adjust if overlapping
+        const targetForCollision = (tableRect ?? rect);
+        if (targetForCollision) {
+          const overlapsVert = (vpTop < targetForCollision.bottom) && (vpTop + menuHeight > targetForCollision.top);
+          const overlapsHorz = (vpLeft < targetForCollision.right) && (vpLeft + menuWidth > targetForCollision.left);
+          if (overlapsVert && overlapsHorz) {
+            const menuRectNow = cMenu.getBoundingClientRect();
+            const selRectNow = targetForCollision as DOMRect | DOMRectReadOnly;
+            if (!inTable) {
+              // Try above, then below with FOLLOW_GAP
+              const tryAbove = Math.max(minTop, Math.min(targetForCollision.top - menuHeight - FOLLOW_GAP, maxTop));
+              const tryBelow = Math.min(maxTop, Math.max(targetForCollision.bottom + FOLLOW_GAP, minTop));
+              // Prefer side that produces less overlap
+              const aboveOverlap = (tryAbove + menuHeight > targetForCollision.top);
+              const belowOverlap = (tryBelow < targetForCollision.bottom);
+              if (!aboveOverlap) vpTop = tryAbove; else if (!belowOverlap) vpTop = tryBelow; else vpTop = (targetForCollision.top - boundsRect.top > boundsRect.bottom - targetForCollision.bottom) ? tryAbove : tryBelow;
+            } else {
+              // In table: 垂直優先的修正（上優先，否則下），上方使用更小間距
+              const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, 6);
+              const tryAbove = Math.max(minTop, Math.min(targetForCollision.top - menuHeight - TABLE_GAP_ABOVE, maxTop));
+              const tryBelow = Math.min(maxTop, Math.max(targetForCollision.bottom + TABLE_GAP, minTop));
+              const aboveOverlap = (tryAbove + menuHeight > targetForCollision.top);
+              const belowOverlap = (tryBelow < targetForCollision.bottom);
+              if (!aboveOverlap) vpTop = tryAbove; else if (!belowOverlap) vpTop = tryBelow; else vpTop = tryBelow;
+            }
+          }
+        }
+
+        // Overlap correction only for table selections（允許越界：只做垂直回退，使用容器邊界）
+        if ((settings.cMenuDockMode ?? 'follow') !== 'fixed' && inTable && (tableRect || rect)) {
+          const target = (tableRect ?? rect);
+          const gapUsed = TABLE_GAP;
+          const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, 6);
+          if (vpTop + menuHeight > target.top && vpTop < target.bottom) {
+            const abovePos = Math.max((useContainerY ? containerRect.top : boundsRect.top) + TABLE_GAP_ABOVE,
+              Math.min(target.top - menuHeight - TABLE_GAP_ABOVE, (useContainerY ? containerRect.bottom : boundsRect.bottom) - menuHeight - TABLE_GAP_ABOVE));
+            const belowPos = Math.min((useContainerY ? containerRect.bottom : boundsRect.bottom) - menuHeight - gapUsed,
+              Math.max(target.bottom + gapUsed, (useContainerY ? containerRect.top : boundsRect.top) + gapUsed));
+            const aboveOverlap = abovePos + menuHeight > target.top;
+            const belowOverlap = belowPos < target.bottom;
+            if (!aboveOverlap) vpTop = abovePos; else if (!belowOverlap) vpTop = belowPos; else vpTop = belowPos;
+          }
+        }
 
         // Convert to parent-local coordinates for absolute positioning
         const parentEl = cMenu.parentElement as HTMLElement | null;
@@ -127,6 +229,30 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         cMenu.style.top = `${localTop}px`;
         cMenu.style.bottom = "auto";
         cMenu.style.right = "auto";
+
+        // Second-pass collision fix with actual selection rect
+        try {
+          const menuRect = cMenu.getBoundingClientRect();
+          const selRect = rect as DOMRect | DOMRectReadOnly | undefined;
+          if (selRect) {
+            const gapFinal = (settings.cMenuDockMode ?? 'follow') === 'fixed' ? GAP : (inTable ? TABLE_GAP : FOLLOW_GAP);
+            const overlapsVert = menuRect.top < selRect.bottom && menuRect.bottom > selRect.top;
+            const overlapsHorz = menuRect.left < selRect.right && menuRect.right > selRect.left;
+            if (overlapsVert && overlapsHorz) {
+              // Try move above selection
+              const aboveTopVp = selRect.top - menuRect.height - gapFinal;
+              const belowTopVp = selRect.bottom + gapFinal;
+              const canAbove = aboveTopVp >= (boundsRect.top + gapFinal);
+              const canBelow = belowTopVp <= (boundsRect.bottom - menuRect.height - gapFinal);
+              let newTopVp: number | null = null;
+              if (canAbove) newTopVp = aboveTopVp; else if (canBelow) newTopVp = belowTopVp; else newTopVp = null;
+              if (newTopVp !== null) {
+                const newTopLocal = newTopVp - (parentRect ? parentRect.top : 0);
+                cMenu.style.top = `${newTopLocal}px`;
+              }
+            }
+          }
+        } catch (_) {}
         // After coordinates are applied, reveal menu (if globally enabled)
         cMenu.style.visibility = 'visible';
       });
@@ -410,7 +536,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
             app.commands.executeCommandById(anyItem.id);
           });
       });
-      
+
     };
     let Markdown = app.workspace.getActiveViewOfType(MarkdownView);
     if (Markdown) {

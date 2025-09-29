@@ -6,17 +6,20 @@ CMENU TOOLBAR
   width: auto;
   height: auto;
   padding: 3px;
-  display: grid;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
   user-select: none;
   border-radius: 6px;
   position: absolute;
   transition: 200ms ease;
   min-width: fit-content;
-  justify-content: start;
   gap: 6px;
   z-index: var(--layer-status-bar);
   box-shadow: 0px 3px 32px rgb(31 38 135 / 15%);
   border: 1px solid var(--background-modifier-border);
+  overflow-x: auto;
   /* Improve scroll experience when overflow mode is scroll */
   -webkit-overflow-scrolling: touch;
 }
