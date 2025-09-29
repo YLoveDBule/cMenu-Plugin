@@ -16,6 +16,14 @@ export function selfDestruct() {
 export function cMenuPopover(app: App, settings: cMenuSettings): void {
   // Ensure we only ever register one global selectionchange handler.
   // The handler reads DOM each time, so it stays valid even if the menu is recreated.
+  // Placement cache to skip redundant layout
+  let __lastPlacementSig: string | undefined;
+  let __lastShouldShow: boolean | undefined;
+  // Cached menu size to avoid reflow on every selectionchange
+  let __menuSize = { w: 0, h: 0 };
+  let __menuSizeDirty = true;
+  // Shared caret start rect for vertical baseline (per tick)
+  let __startRectGlobal: DOMRect | DOMRectReadOnly | undefined;
   let handlerInstalled = (window as any).__cMenuSelectionHandlerInstalled as boolean | undefined;
   if (!handlerInstalled) {
     const onSelectionChange = debounce(() => {
@@ -61,12 +69,21 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
           return;
         }
 
-        const menuWidth = cMenu.offsetWidth;
-        const menuHeight = cMenu.offsetHeight;
+        // Measure menu size only when needed
+        if (__menuSizeDirty || __menuSize.w <= 0 || __menuSize.h <= 0) {
+          __menuSize.w = cMenu.offsetWidth;
+          __menuSize.h = cMenu.offsetHeight;
+          __menuSizeDirty = false;
+        }
+        let menuWidth = __menuSize.w;
+        let menuHeight = __menuSize.h;
         const rawGap = Number(settings.cMenuBottomValue);
         const GAP = Number.isFinite(rawGap) ? rawGap : 0; // configurable gap from selection
-        const FOLLOW_GAP = Math.max(GAP, 6); // minimal breathing room for normal selections
-        const TABLE_GAP = Math.max(GAP, 10); // stronger breathing room in tables
+        const FOLLOW_GAP_MIN = Number.isFinite(settings.cMenuFollowGapMin as any) ? (settings.cMenuFollowGapMin as number) : 6;
+        const TABLE_GAP_MIN = Number.isFinite(settings.cMenuTableGapMin as any) ? (settings.cMenuTableGapMin as number) : 10;
+        const TABLE_GAP_ABOVE_CFG = Number.isFinite(settings.cMenuTableGapAbove as any) ? (settings.cMenuTableGapAbove as number) : 6;
+        const FOLLOW_GAP = Math.max(GAP, FOLLOW_GAP_MIN); // minimal breathing room for normal selections
+        const TABLE_GAP = Math.max(GAP, TABLE_GAP_MIN); // stronger breathing room in tables
 
         // Determine editor bounds: prefer container closest to selection anchor
         const mdView = app.workspace.getActiveViewOfType(MarkdownView);
@@ -95,6 +112,31 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
 
         let vpLeft = 0;
         let vpTop = 0;
+
+        // Visibility decision for caching
+        const shouldShow = (settings.cMenuDockMode ?? 'follow') === 'fixed' ? true : hasSelection;
+        // Build a lightweight signature of inputs that affect placement
+        const sigParts = [
+          (settings.cMenuDockMode ?? 'follow'),
+          shouldShow ? 1 : 0,
+          inTable ? 1 : 0,
+          rect?.left ?? 0, rect?.top ?? 0, rect?.width ?? 0, rect?.height ?? 0,
+          boundsRect.left, boundsRect.top, boundsRect.right, boundsRect.bottom,
+          __menuSize.w, __menuSize.h,
+          GAP, FOLLOW_GAP, TABLE_GAP, TABLE_GAP_ABOVE_CFG,
+          settings.cMenuAllowTableOverflow ? 1 : 0,
+          settings.cMenuCompactInTable ? 1 : 0,
+        ];
+        const placementSig = sigParts.join('|');
+        if (__lastPlacementSig === placementSig && __lastShouldShow === shouldShow) {
+          // No change: ensure visibility is correct and skip heavy reposition
+          if (shouldShow) {
+            cMenu.style.visibility = 'visible';
+          } else {
+            cMenu.style.visibility = 'hidden';
+          }
+          return;
+        }
         if ((settings.cMenuDockMode ?? 'follow') === 'fixed') {
           // Fixed: center at top of editor bounds, shifted by GAP
           vpLeft = boundsRect.left + Math.max(0, (boundsRect.width - menuWidth) / 2);
@@ -102,6 +144,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         } else {
           // Follow: align to selection start, choose above/below
           let startX = rect.left;
+          __startRectGlobal = undefined;
           try {
             const sel = document.getSelection();
             if (sel && sel.rangeCount > 0) {
@@ -110,6 +153,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
               const startRect = rng.getBoundingClientRect();
               if (startRect && (startRect.width || startRect.height)) {
                 startX = startRect.left;
+                __startRectGlobal = startRect as DOMRect;
               }
             }
           } catch (_) {}
@@ -125,50 +169,88 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
             const maxY = boundsRect.bottom - menuHeight - TABLE_GAP;
             const clampX = (x: number) => Math.max(minX, Math.min(x, maxX));
             const clampY = (y: number) => Math.max(minY, Math.min(y, maxY));
-            const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, 6); // 讓上方更貼近選區
+            const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, TABLE_GAP_ABOVE_CFG); // 讓上方更貼近選區
 
             // 水平位置：對齊選區居中
             const centerX = target.left + Math.max(0, (target.width - menuWidth) / 2);
             vpLeft = clampX(centerX);
 
-            const availableAbove = target.top - boundsRect.top;
-            const availableBelow = boundsRect.bottom - target.bottom;
+            const vBase = (settings.cMenuUseStartRectVertical && __startRectGlobal && (__startRectGlobal.width || __startRectGlobal.height)) ? (__startRectGlobal as DOMRect) : target;
+            const availableAbove = vBase.top - boundsRect.top;
+            const availableBelow = boundsRect.bottom - vBase.bottom;
             const canAbove = availableAbove >= (menuHeight + TABLE_GAP);
             const canBelow = availableBelow >= (menuHeight + TABLE_GAP);
             if (canAbove) {
-              vpTop = clampY(target.top - menuHeight - TABLE_GAP_ABOVE);
+              vpTop = clampY(vBase.top - menuHeight - TABLE_GAP_ABOVE);
             } else if (canBelow) {
-              vpTop = clampY(target.bottom + TABLE_GAP);
+              vpTop = clampY(vBase.bottom + TABLE_GAP);
             } else {
               // 極端狀況：上下皆不足，選擇重疊較小的一側（仍保持上下擺放，不側向）
-              const tryAbove = clampY(target.top - menuHeight - TABLE_GAP_ABOVE);
-              const tryBelow = clampY(target.bottom + TABLE_GAP);
-              const overlapAbove = Math.max(0, (tryAbove + menuHeight) - target.top);
-              const overlapBelow = Math.max(0, target.bottom - tryBelow);
+              const tryAbove = clampY(vBase.top - menuHeight - TABLE_GAP_ABOVE);
+              const tryBelow = clampY(vBase.bottom + TABLE_GAP);
+              const overlapAbove = Math.max(0, (tryAbove + menuHeight) - vBase.top);
+              const overlapBelow = Math.max(0, vBase.bottom - tryBelow);
               vpTop = overlapAbove <= overlapBelow ? tryAbove : tryBelow;
             }
           } else {
             // Non-table: original above/below heuristic
-            const availableAbove = target.top - boundsRect.top;
-            const availableBelow = boundsRect.bottom - target.bottom;
+            const vBase = (settings.cMenuUseStartRectVertical && __startRectGlobal && (__startRectGlobal.width || __startRectGlobal.height)) ? (__startRectGlobal as DOMRect) : target;
+            const availableAbove = vBase.top - boundsRect.top;
+            const availableBelow = boundsRect.bottom - vBase.bottom;
             const placeBelow = availableAbove < (menuHeight + FOLLOW_GAP) && availableBelow >= (menuHeight + FOLLOW_GAP);
-            vpTop = placeBelow ? (target.bottom + FOLLOW_GAP) : (target.top - menuHeight - FOLLOW_GAP);
+            vpTop = placeBelow ? (vBase.bottom + FOLLOW_GAP) : (vBase.top - menuHeight - FOLLOW_GAP);
           }
         }
 
-        // Clamp horizontally; 在表格且過窄時改用容器邊界允許越界編輯區
+        // Optional COMPACT MODE (wrap) for narrow table area + 溢出模式联动
+        const allowOverflow = !!settings.cMenuAllowTableOverflow;
+        const wantCompact = !!settings.cMenuCompactInTable;
+        const baseWrap = (settings.cMenuOverflowMode ?? 'wrap') === 'wrap';
+        if (inTable && wantCompact && (!allowOverflow || (menuWidth + 2 * GAP > boundsRect.width))) {
+          // Enable compact: wrap and clamp max-width to editor bounds
+          const maxW = Math.max(160, Math.floor(boundsRect.width - 2 * GAP));
+          if (cMenu.style.flexWrap !== 'wrap' || cMenu.style.maxWidth !== `${maxW}px`) {
+            cMenu.classList.add('cMenuCompact');
+            cMenu.style.flexWrap = 'wrap';
+            cMenu.style.maxWidth = `${maxW}px`;
+            cMenu.style.overflowX = 'hidden';
+            // Remeasure after style change
+            __menuSize.w = cMenu.offsetWidth;
+            __menuSize.h = cMenu.offsetHeight;
+            menuWidth = __menuSize.w;
+            menuHeight = __menuSize.h;
+          }
+        } else {
+          // Apply base overflow mode when not in compact
+          const expectedWrap = baseWrap ? 'wrap' : 'nowrap';
+          const expectedOverflowX = baseWrap ? 'hidden' : 'auto';
+          let changed = false;
+          if (cMenu.classList.contains('cMenuCompact')) { cMenu.classList.remove('cMenuCompact'); changed = true; }
+          if (cMenu.style.flexWrap !== expectedWrap) { cMenu.style.flexWrap = expectedWrap; changed = true; }
+          if (!baseWrap && cMenu.style.maxWidth) { cMenu.style.maxWidth = ''; changed = true; }
+          if (cMenu.style.overflowX !== expectedOverflowX) { cMenu.style.overflowX = expectedOverflowX; changed = true; }
+          if (changed) {
+            __menuSize.w = cMenu.offsetWidth;
+            __menuSize.h = cMenu.offsetHeight;
+            menuWidth = __menuSize.w;
+            menuHeight = __menuSize.h;
+          }
+        }
+
+        // Clamp horizontally; 在表格且過窄时且允许越界时改用容器边界
         const containerRect = (cMenu.parentElement?.getBoundingClientRect()) || document.body.getBoundingClientRect();
-        const tooWideForBounds = inTable && (menuWidth + 2 * GAP > boundsRect.width);
+        const tooWideForBounds = inTable && allowOverflow && (menuWidth + 2 * GAP > boundsRect.width);
         const minLeft = (tooWideForBounds ? containerRect.left : boundsRect.left) + GAP;
         const maxLeft = (tooWideForBounds ? containerRect.right : boundsRect.right) - menuWidth - GAP;
         vpLeft = Math.max(minLeft, Math.min(vpLeft, maxLeft));
 
-        // Clamp vertically; 表格且上下皆不足時改用容器邊界允許越界編輯區
+        // Clamp vertically; 表格且上下皆不足且允许越界时改用容器边界
         const activeGap = (settings.cMenuDockMode ?? 'follow') === 'fixed' ? GAP : (inTable ? TABLE_GAP : FOLLOW_GAP);
         const targetY = (tableRect ?? rect);
-        const needContainerY = !!(inTable && targetY &&
-          ((targetY.top - boundsRect.top) < (menuHeight + TABLE_GAP)) &&
-          ((boundsRect.bottom - targetY.bottom) < (menuHeight + TABLE_GAP)));
+        const vBaseY = (settings.cMenuUseStartRectVertical && __startRectGlobal && (__startRectGlobal.width || __startRectGlobal.height)) ? (__startRectGlobal as DOMRect) : targetY;
+        const needContainerY = !!(inTable && allowOverflow && vBaseY &&
+          ((vBaseY.top - boundsRect.top) < (menuHeight + TABLE_GAP)) &&
+          ((boundsRect.bottom - vBaseY.bottom) < (menuHeight + TABLE_GAP)));
         const useContainerY = needContainerY;
         const minTop = (useContainerY ? containerRect.top : boundsRect.top) + activeGap;
         const maxTop = (useContainerY ? containerRect.bottom : boundsRect.bottom) - menuHeight - activeGap;
@@ -193,7 +275,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
               if (!aboveOverlap) vpTop = tryAbove; else if (!belowOverlap) vpTop = tryBelow; else vpTop = (targetForCollision.top - boundsRect.top > boundsRect.bottom - targetForCollision.bottom) ? tryAbove : tryBelow;
             } else {
               // In table: 垂直優先的修正（上優先，否則下），上方使用更小間距
-              const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, 6);
+              const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, TABLE_GAP_ABOVE_CFG);
               const tryAbove = Math.max(minTop, Math.min(targetForCollision.top - menuHeight - TABLE_GAP_ABOVE, maxTop));
               const tryBelow = Math.min(maxTop, Math.max(targetForCollision.bottom + TABLE_GAP, minTop));
               const aboveOverlap = (tryAbove + menuHeight > targetForCollision.top);
@@ -207,7 +289,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         if ((settings.cMenuDockMode ?? 'follow') !== 'fixed' && inTable && (tableRect || rect)) {
           const target = (tableRect ?? rect);
           const gapUsed = TABLE_GAP;
-          const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, 6);
+          const TABLE_GAP_ABOVE = Math.min(TABLE_GAP, TABLE_GAP_ABOVE_CFG);
           if (vpTop + menuHeight > target.top && vpTop < target.bottom) {
             const abovePos = Math.max((useContainerY ? containerRect.top : boundsRect.top) + TABLE_GAP_ABOVE,
               Math.min(target.top - menuHeight - TABLE_GAP_ABOVE, (useContainerY ? containerRect.bottom : boundsRect.bottom) - menuHeight - TABLE_GAP_ABOVE));
@@ -255,6 +337,9 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         } catch (_) {}
         // After coordinates are applied, reveal menu (if globally enabled)
         cMenu.style.visibility = 'visible';
+        // Update placement cache
+        __lastPlacementSig = placementSig;
+        __lastShouldShow = shouldShow;
       });
     }, 16, true);
 
@@ -281,6 +366,70 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         : cMenu.addClass("cMenuGlassAesthetic");
       // Always insert within the workspace container to scope layout correctly
       app.workspace.containerEl.insertAdjacentElement("afterbegin", cMenu);
+      // ---- MRU helpers ----
+      const MRU_KEY = 'cMenu.mru.v1';
+      type MruItem = { id: string; name: string; icon?: string; type: 'cmd'|'macro'; count: number; lastUsed: number };
+      const loadMRU = (): Record<string, MruItem> => {
+        try { const raw = localStorage.getItem(MRU_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+      };
+      const saveMRU = (data: Record<string, MruItem>) => { try { localStorage.setItem(MRU_KEY, JSON.stringify(data)); } catch {} };
+      const recordMRU = (key: string, name: string, icon: string|undefined, type: 'cmd'|'macro') => {
+        const m = loadMRU();
+        const now = Date.now();
+        const prev = m[key];
+        m[key] = { id: key, name: name || key, icon, type, count: (prev?.count ?? 0) + 1, lastUsed: now };
+        saveMRU(m);
+      };
+      const getTopMRU = (limit = 5): MruItem[] => {
+        const m = Object.values(loadMRU());
+        m.sort((a,b) => (b.lastUsed - a.lastUsed) || (b.count - a.count));
+        return m.slice(0, limit);
+      };
+      const renderMRU = (root: HTMLElement) => {
+        const items = getTopMRU(5);
+        if (!items.length) return;
+        const wrap = createEl('div');
+        wrap.style.display = 'flex';
+        wrap.style.flexWrap = 'wrap';
+        wrap.style.gap = `${Number.isFinite((settings as any).cMenuButtonGap) ? (settings as any).cMenuButtonGap : 6}px`;
+        wrap.style.marginRight = '6px';
+        // Label
+        const label = new ButtonComponent(wrap);
+        label.setClass('cMenuCommandItem');
+        label.setTooltip('最近使用');
+        label.setIcon('clock');
+        label.buttonEl.setAttribute('aria-label','最近使用');
+        label.setDisabled(true);
+        // Buttons
+        items.forEach(it => {
+          const btn = new ButtonComponent(wrap);
+          btn
+            .setIcon(it.icon || (it.type==='macro' ? 'bot-glyph' : 'clock'))
+            .setClass('cMenuCommandItem')
+            .setTooltip(it.name)
+            .onClick(async () => {
+              if (it.type === 'cmd') {
+                //@ts-ignore
+                app.commands.executeCommandById(it.id);
+                recordMRU(it.id, it.name, it.icon, 'cmd');
+                return;
+              }
+              // macro: find by name
+              const macro = (settings.menuCommands as any[]).find(x => x?.type === 'macro' && x?.name === it.name);
+              if (macro) {
+                try {
+                  btn.setDisabled(true);
+                  // reuse runMacro defined below
+                  await runMacro(macro);
+                } finally {
+                  btn.setDisabled(false);
+                }
+                recordMRU('macro:'+it.name, it.name, it.icon, 'macro');
+              }
+            });
+        });
+        root.appendChild(wrap);
+      };
       // Helper: render a group button with hover/long-press submenu
       const renderGroup = (root: HTMLElement, group: any) => {
         const groupBtn = new ButtonComponent(root);
@@ -325,6 +474,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
                 .onClick(() => {
                   //@ts-ignore
                   app.commands.executeCommandById(child.id);
+                  recordMRU(child.id, child.name, child.icon, 'cmd');
                   // Close submenu after action
                   submenu.style.display = "none";
                   groupBtn.buttonEl.setAttribute('aria-expanded', 'false');
@@ -349,6 +499,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
                   // Close submenu after macro completes
                   submenu.style.display = 'none';
                   groupBtn.buttonEl.setAttribute('aria-expanded', 'false');
+                  recordMRU('macro:'+child.name, child.name, child.icon, 'macro');
                 });
               macroBtn.buttonEl.setAttribute('role', 'menuitem');
               return;
@@ -503,6 +654,9 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         }
       };
 
+      // MRU section first
+      renderMRU(cMenu);
+
       settings.menuCommands.forEach((item) => {
         const anyItem = item as any;
         if (anyItem && anyItem.type === "group") {
@@ -522,6 +676,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
               } finally {
                 btn.setDisabled(false);
               }
+              recordMRU('macro:'+ (anyItem.name || 'Macro'), anyItem.name || 'Macro', anyItem.icon, 'macro');
             });
           return;
         }
@@ -534,6 +689,7 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
           .onClick(() => {
             //@ts-ignore
             app.commands.executeCommandById(anyItem.id);
+            recordMRU(anyItem.id, anyItem.name, anyItem.icon, 'cmd');
           });
       });
 

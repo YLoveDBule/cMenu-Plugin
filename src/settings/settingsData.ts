@@ -29,6 +29,13 @@ export interface cMenuSettings {
   cMenuDockMode?: 'follow' | 'fixed';
   cMenuOverflowMode?: 'wrap' | 'scroll';
   cMenuMaxWidthPct?: number; // 30-100
+  // Positioning advanced options
+  cMenuAllowTableOverflow?: boolean; // allow menu to overflow editor bounds for tables
+  cMenuCompactInTable?: boolean;     // compact mode when table area is too narrow (future use)
+  cMenuFollowGapMin?: number;        // minimal gap for normal selections (defaults to 6)
+  cMenuTableGapMin?: number;         // minimal gap for table selections (defaults to 10)
+  cMenuTableGapAbove?: number;       // smaller gap when placing above in tables (defaults to 6)
+  cMenuUseStartRectVertical?: boolean; // use start-caret rect as vertical baseline
 }
 
 export const DEFAULT_SETTINGS: cMenuSettings = {
@@ -88,4 +95,11 @@ export const DEFAULT_SETTINGS: cMenuSettings = {
   cMenuDockMode: 'follow',
   cMenuOverflowMode: 'wrap',
   cMenuMaxWidthPct: 100,
+  // Positioning advanced defaults
+  cMenuAllowTableOverflow: true,
+  cMenuCompactInTable: false,
+  cMenuFollowGapMin: 6,
+  cMenuTableGapMin: 10,
+  cMenuTableGapAbove: 6,
+  cMenuUseStartRectVertical: false,
 };

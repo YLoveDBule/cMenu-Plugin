@@ -161,6 +161,111 @@ export class cMenuSettingTab extends PluginSettingTab {
           .setDynamicTooltip();
       });
 
+    // ===== 定位与间距 =====
+    appearanceEl.createEl('h3', { text: '定位与间距' });
+
+    new Setting(appearanceEl)
+      .setName('表格内允许越界（单行）')
+      .setDesc('当表格区域太窄或上下空间不足时，允许菜单越出编辑区边界以保持单行显示。')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(!!this.plugin.settings.cMenuAllowTableOverflow)
+          .onChange(
+            debounce(async (v: boolean) => {
+              this.plugin.settings.cMenuAllowTableOverflow = v;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          );
+      });
+
+    new Setting(appearanceEl)
+      .setName('表格紧凑模式（换行）')
+      .setDesc('在表格内过窄时允许菜单自动换行以变窄（可与越界模式二选一）。当前仅作为预留开关。')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(!!this.plugin.settings.cMenuCompactInTable)
+          .onChange(
+            debounce(async (v: boolean) => {
+              this.plugin.settings.cMenuCompactInTable = v;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          );
+      });
+
+    new Setting(appearanceEl)
+      .setName('普通场景最小间距 (px)')
+      .setDesc('非表格场景下菜单与选区的最小间距。')
+      .addSlider((slider) => {
+        slider
+          .setLimits(0, 24, 1)
+          .setValue(this.plugin.settings.cMenuFollowGapMin ?? 6)
+          .onChange(
+            debounce(async (value: number) => {
+              this.plugin.settings.cMenuFollowGapMin = value;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    new Setting(appearanceEl)
+      .setName('表格场景最小间距 (px)')
+      .setDesc('表格内上下放置时使用的最小间距。')
+      .addSlider((slider) => {
+        slider
+          .setLimits(0, 24, 1)
+          .setValue(this.plugin.settings.cMenuTableGapMin ?? 10)
+          .onChange(
+            debounce(async (value: number) => {
+              this.plugin.settings.cMenuTableGapMin = value;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    new Setting(appearanceEl)
+      .setName('表格“上方”最小间距 (px)')
+      .setDesc('当菜单放在表格选区上方时使用的更小间距（贴近一些）。')
+      .addSlider((slider) => {
+        slider
+          .setLimits(0, 16, 1)
+          .setValue(this.plugin.settings.cMenuTableGapAbove ?? 6)
+          .onChange(
+            debounce(async (value: number) => {
+              this.plugin.settings.cMenuTableGapAbove = value;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    new Setting(appearanceEl)
+      .setName('使用起始光标作为垂直基准')
+      .setDesc('上/下放置时以起始光标所在行的 rect 作为垂直判断基准，更贴近光标位置。')
+      .addToggle((toggle) => {
+        toggle
+          .setValue(!!this.plugin.settings.cMenuUseStartRectVertical)
+          .onChange(
+            debounce(async (v: boolean) => {
+              this.plugin.settings.cMenuUseStartRectVertical = v;
+              setBottomValue(this.plugin.settings);
+              await this.plugin.saveSettings();
+              document.dispatchEvent(new Event('selectionchange'));
+            }, 100, true)
+          );
+      });
+
     new Setting(appearanceEl)
       .setName('刷新 cMenu')
       .setDesc('添加/删除命令后会自动刷新。若调整了外观或布局，请手动刷新。')
