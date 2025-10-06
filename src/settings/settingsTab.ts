@@ -1,6 +1,6 @@
 import type cMenuPlugin from "src/plugin/main";
 import { CommandPicker, MacroPicker } from "src/modals/suggesterModals";
-import { App, Setting, PluginSettingTab, ButtonComponent } from "obsidian";
+import { App, Setting, PluginSettingTab, ButtonComponent, Notice } from "obsidian";
 import { AESTHETIC_STYLES, MenuItem, GroupItem, MacroItem } from "src/settings/settingsData";
 import { setBottomValue } from "src/util/statusBarConstants";
 import { selfDestruct, cMenuPopover } from "src/modals/cMenuModal";
@@ -8,6 +8,13 @@ import Sortable from "sortablejs";
 import { debounce } from "obsidian";
 import { searchIcons, getSuggestedIcons, validateIcon, getIconInfo, COMMON_ICONS } from "src/icons/catalog";
 import { IconPickerModal } from "src/modals/iconPickerModal";
+import { showBatchProcessingModal } from "src/ui/batchProcessingModal";
+import { showPerformanceDashboard } from "src/ui/performanceDashboard";
+import { showHistoryModal } from "src/ui/historyModal";
+import { showTemplateManager } from "src/ui/templateModal";
+import { HistoryManager } from "src/features/historyManager";
+import { TemplateManager } from "src/features/templateManager";
+import { DEFAULT_SETTINGS } from "src/settings/settingsData";
 
 export class cMenuSettingTab extends PluginSettingTab {
   plugin: cMenuPlugin;
@@ -38,6 +45,10 @@ export class cMenuSettingTab extends PluginSettingTab {
       appearance: body.createDiv({ cls: 'cMenu-settings-tab' }),
       commands: body.createDiv({ cls: 'cMenu-settings-tab' }),
       ai: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      batch: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      history: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      templates: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      performance: body.createDiv({ cls: 'cMenu-settings-tab' }),
       about: body.createDiv({ cls: 'cMenu-settings-tab' }),
     };
 
@@ -60,6 +71,10 @@ export class cMenuSettingTab extends PluginSettingTab {
     addTabBtn('appearance', '外观');
     addTabBtn('commands', '命令与分组');
     addTabBtn('ai', 'AI 助手');
+    addTabBtn('batch', '批量处理');
+    addTabBtn('history', '历史管理');
+    addTabBtn('templates', '模板管理');
+    addTabBtn('performance', '性能监控');
     addTabBtn('about', '关于');
 
     // ========== 外观 ==========
@@ -745,8 +760,33 @@ export class cMenuSettingTab extends PluginSettingTab {
       });
 
     // ---- AI 动作列表（自定义二级菜单） ----
-    aiEl.createEl('h4', { text: 'AI 动作列表（可自定义二级菜单）' });
+    const aiActionsHeader = aiEl.createDiv({ cls: 'setting-item' });
+    aiActionsHeader.createEl('h4', { text: 'AI 动作列表（可自定义二级菜单）' });
+    
+    // 重置按钮
+    const resetBtn = new ButtonComponent(aiActionsHeader);
+    resetBtn.setButtonText('重置为默认')
+      .setClass('mod-warning')
+      .onClick(async () => {
+        if (confirm('确定要重置 AI 动作列表为默认设置吗？这将会覆盖所有自定义修改。')) {
+          this.plugin.settings.aiActions = DEFAULT_SETTINGS.aiActions.slice();
+          await this.plugin.saveSettings();
+          this.display(); // 重新渲染界面
+        }
+      });
+    
     const aiActions = (this.plugin.settings.aiActions || []) as any[];
+    console.log('[cMenu Settings] AI Actions loaded:', aiActions.length, aiActions.map(a => a.name));
+    
+    // 如果没有AI动作，显示提示
+    if (aiActions.length === 0) {
+      const emptyMsg = aiEl.createDiv({ cls: 'setting-item-description' });
+      emptyMsg.createEl('p', { 
+        text: '没有找到 AI 动作列表。请点击上方“重置为默认”按钮来初始化默认动作。',
+        cls: 'mod-warning'
+      });
+    }
+    
     const actionsContainer = aiEl.createDiv({ cls: 'cMenuSettingsTabsContainer' });
     const renderAction = (action: any) => {
       const item = new Setting(actionsContainer)
@@ -998,14 +1038,212 @@ export class cMenuSettingTab extends PluginSettingTab {
         });
       });
 
+    // ========== 批量处理 ==========
+    const batchEl = sections.batch;
+    batchEl.createEl('h3', { text: '批量处理' });
+    
+    batchEl.createEl('p', { 
+      text: '批量处理功能允许您将长文档分割为多个块，并行处理，提高效率。',
+      cls: 'setting-item-description'
+    });
+    
+    new Setting(batchEl)
+      .setName('打开批量处理界面')
+      .setDesc('创建和管理批量处理任务')
+      .addButton(btn => {
+        btn.setButtonText('打开批量处理')
+          .setClass('mod-cta')
+          .onClick(() => {
+            showBatchProcessingModal(this.app, this.plugin.settings);
+          });
+      });
+
+    // ========== 历史管理 ==========
+    const historyEl = sections.history;
+    historyEl.createEl('h3', { text: '历史管理' });
+    
+    historyEl.createEl('p', { 
+      text: 'AI 处理结果的历史记录，支持搜索、收藏和重用。',
+      cls: 'setting-item-description'
+    });
+    
+    new Setting(historyEl)
+      .setName('打开历史管理界面')
+      .setDesc('查看、搜索和管理 AI 处理的历史记录')
+      .addButton(btn => {
+        btn.setButtonText('打开历史管理')
+          .setClass('mod-cta')
+          .onClick(() => {
+            showHistoryModal(this.app);
+          });
+      });
+    
+    // 历史设置
+    new Setting(historyEl)
+      .setName('最大历史记录数')
+      .setDesc('设置保存的最大历史记录数量（100-5000）')
+      .addSlider(slider => {
+        const historyManager = HistoryManager.getInstance();
+        slider.setLimits(100, 5000, 100)
+          .setValue(historyManager.getMaxEntries())
+          .onChange(value => {
+            historyManager.setMaxEntries(value);
+          })
+          .setDynamicTooltip();
+      });
+
+    // ========== 模板管理 ==========
+    const templatesEl = sections.templates;
+    templatesEl.createEl('h3', { text: '模板管理' });
+    
+    templatesEl.createEl('p', { 
+      text: '创建和管理自定义 AI 动作模板，支持分类、标签、评分和导入导出。',
+      cls: 'setting-item-description'
+    });
+    
+    new Setting(templatesEl)
+      .setName('打开模板管理器')
+      .setDesc('创建、编辑和管理 AI 动作模板')
+      .addButton(btn => {
+        btn.setButtonText('打开模板管理')
+          .setClass('mod-cta')
+          .onClick(() => {
+            showTemplateManager(this.app);
+          });
+      });
+    
+    // 模板统计
+    const templateManager = TemplateManager.getInstance();
+    const templateStats = templateManager.getStats();
+    
+    const statsSection = templatesEl.createDiv({ cls: 'setting-item-description' });
+    statsSection.createEl('h4', { text: '模板统计' });
+    const statsList = statsSection.createEl('ul');
+    statsList.createEl('li', { text: `总模板数：${templateStats.totalTemplates}` });
+    statsList.createEl('li', { text: `收藏模板：${templateStats.favoriteTemplates}` });
+    statsList.createEl('li', { text: `平均评分：${templateStats.averageRating.toFixed(1)}` });
+    
+    const mostUsedTemplate = templateStats.mostUsedTemplate 
+      ? templateManager.getTemplate(templateStats.mostUsedTemplate)?.name || '无'
+      : '无';
+    statsList.createEl('li', { text: `最常用：${mostUsedTemplate}` });
+    
+    // 快速操作
+    const quickActions = templatesEl.createDiv({ cls: 'setting-item-description' });
+    quickActions.createEl('h4', { text: '快速操作' });
+    
+    const actionsRow = quickActions.createDiv({ cls: 'template-quick-actions' });
+    
+    const importBtn = actionsRow.createEl('button', { 
+      text: '导入模板',
+      cls: 'template-action-btn'
+    });
+    importBtn.addEventListener('click', () => {
+      this.importTemplatesQuick();
+    });
+    
+    const exportBtn = actionsRow.createEl('button', { 
+      text: '导出所有',
+      cls: 'template-action-btn'
+    });
+    exportBtn.addEventListener('click', () => {
+      this.exportAllTemplates();
+    });
+    
+    const clearBtn = actionsRow.createEl('button', { 
+      text: '清空模板',
+      cls: 'template-action-btn mod-warning'
+    });
+    clearBtn.addEventListener('click', () => {
+      this.clearAllTemplates();
+    });
+    
+    // 模板分类说明
+    const categoriesInfo = templatesEl.createDiv({ cls: 'setting-item-description' });
+    categoriesInfo.createEl('h4', { text: '默认分类' });
+    const categoriesList = categoriesInfo.createEl('ul');
+    const categories = templateManager.getAllCategories();
+    categories.slice(0, 4).forEach(category => {
+      categoriesList.createEl('li', { text: `${category.name}：${category.description}` });
+    });
+    
+    // ========== 性能监控 ==========
+    const performanceEl = sections.performance;
+    performanceEl.createEl('h3', { text: '性能监控' });
+    
+    performanceEl.createEl('p', { 
+      text: '实时监控 AI 模块的性能指标，优化系统设置。',
+      cls: 'setting-item-description'
+    });
+    
+    new Setting(performanceEl)
+      .setName('打开性能面板')
+      .setDesc('查看实时性能数据和优化建议')
+      .addButton(btn => {
+        btn.setButtonText('打开性能面板')
+          .setClass('mod-cta')
+          .onClick(() => {
+            showPerformanceDashboard(this.app);
+          });
+      });
+    
+    // 性能监控说明
+    const perfInfo = performanceEl.createDiv({ cls: 'setting-item-description' });
+    perfInfo.createEl('h4', { text: '性能指标说明' });
+    const perfList = perfInfo.createEl('ul');
+    perfList.createEl('li', { text: '缓存命中率：显示 AI 响应缓存的效率' });
+    perfList.createEl('li', { text: '队列吞吐量：每秒处理的请求数量' });
+    perfList.createEl('li', { text: '内存使用：当前内存占用情况' });
+    perfList.createEl('li', { text: '渲染性能：流式渲染的 FPS 和延迟' });
+    
+    const perfTips = performanceEl.createDiv({ cls: 'setting-item-description' });
+    perfTips.createEl('h4', { text: '性能优化建议' });
+    const tipsList = perfTips.createEl('ul');
+    tipsList.createEl('li', { text: '如果缓存命中率低，可考虑增加缓存大小' });
+    tipsList.createEl('li', { text: '如果队列堆积，可调整并发数量' });
+    tipsList.createEl('li', { text: '如果内存使用过高，可开启自动清理' });
+    tipsList.createEl('li', { text: '如果渲染卡顿，可降低渲染质量' });
+
     // ========== 关于 ==========
     const aboutEl = sections.about;
-    aboutEl.createEl('h3', { text: '关于' });
+    aboutEl.createEl('h3', { text: '关于 cMenu AI 助手' });
+    
+    // 基本信息
     const meta = aboutEl.createEl('div', { cls: 'cMenu-about' });
     meta.createEl('p', { text: `版本：v${this.plugin.manifest.version}` });
     const creditP = meta.createEl('p');
-    creditP.appendText('作者：');
+    creditP.appendText('原作者：');
     creditP.createEl('a', { text: 'Chetachi', href: 'https://github.com/chetachiezikeuzor' });
+    
+    // AI 增强功能介绍
+    const aiFeatures = aboutEl.createDiv({ cls: 'setting-item-description' });
+    aiFeatures.createEl('h4', { text: 'AI 增强功能' });
+    const featuresList = aiFeatures.createEl('ul');
+    featuresList.createEl('li', { text: '智能文本处理：优化、翻译、总结、解释、改进、续写' });
+    featuresList.createEl('li', { text: '批量处理：支持长文档分块并行处理' });
+    featuresList.createEl('li', { text: '历史管理：完整的 AI 操作历史记录和管理' });
+    featuresList.createEl('li', { text: '性能优化：智能缓存、流式渲染、预加载' });
+    featuresList.createEl('li', { text: '稳定性增强：重试机制、错误处理、进度显示' });
+    
+    // 技术特性
+    const techFeatures = aboutEl.createDiv({ cls: 'setting-item-description' });
+    techFeatures.createEl('h4', { text: '技术特性' });
+    const techList = techFeatures.createEl('ul');
+    techList.createEl('li', { text: '支持 DeepSeek 和 OpenAI 兼容接口' });
+    techList.createEl('li', { text: '流式输出和实时预览' });
+    techList.createEl('li', { text: '自适应性能配置和监控' });
+    techList.createEl('li', { text: '本地存储和数据安全' });
+    techList.createEl('li', { text: '响应式设计和主题适配' });
+    
+    // 更新日志
+    const changelog = aboutEl.createDiv({ cls: 'setting-item-description' });
+    changelog.createEl('h4', { text: '最近更新' });
+    const changeList = changelog.createEl('ul');
+    changeList.createEl('li', { text: 'Phase 3: 功能增强 - 批量处理和历史管理' });
+    changeList.createEl('li', { text: 'Phase 2: 性能优化 - 缓存、流式渲染、预加载' });
+    changeList.createEl('li', { text: 'Phase 1: 稳定性增强 - 重试、错误处理、进度显示' });
+    changeList.createEl('li', { text: '新增 6 个默认 AI 动作和自定义支持' });
+    
     meta.createEl('p', { text: '如果你喜欢这个插件并希望支持持续开发，可以点击下方按钮赞助。' });
     aboutEl.appendChild(createDonateButton('https://www.buymeacoffee.com/chetachi'));
 
@@ -1016,6 +1254,64 @@ export class cMenuSettingTab extends PluginSettingTab {
       : fallbackKey;
     switchTo(initialKey);
   }
+
+  // 模板管理快速操作方法
+  private importTemplatesQuick() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.addEventListener('change', (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target?.result as string;
+          const templateManager = TemplateManager.getInstance();
+          const importedCount = templateManager.importTemplates(data, 'merge');
+          new Notice(`成功导入 ${importedCount} 个模板`);
+          this.display(); // 刷新界面以更新统计信息
+        } catch (error) {
+          new Notice(`导入失败：${error.message}`);
+        }
+      };
+      reader.readAsText(file);
+    });
+    
+    input.click();
+  }
+
+  private exportAllTemplates() {
+    const templateManager = TemplateManager.getInstance();
+    const data = templateManager.exportTemplates();
+    
+    // 复制到剪贴板
+    navigator.clipboard.writeText(data).then(() => {
+      new Notice('所有模板已复制到剪贴板');
+    }).catch(() => {
+      // 创建下载链接
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `all_templates_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      new Notice('所有模板已下载');
+    });
+  }
+
+  private clearAllTemplates() {
+    if (confirm('确定要清空所有模板吗？此操作不可恢复！')) {
+      const templateManager = TemplateManager.getInstance();
+      const count = templateManager.clearAll();
+      new Notice(`已清空 ${count} 个模板`);
+      this.display(); // 刷新界面以更新统计信息
+    }
+  }
+
 }
 
 const createDonateButton = (link: string): HTMLElement => {

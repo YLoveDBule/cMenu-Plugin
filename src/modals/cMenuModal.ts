@@ -7,6 +7,7 @@ import { StreamRenderer, createOptimizedRenderer } from "src/ai/streamRenderer";
 import { triggerContextualPreload } from "src/ai/preloader";
 import { wait } from "src/util/util";
 import { setBottomValue } from "src/util/statusBarConstants";
+import { addHistoryEntry } from "src/features/historyManager";
 
 export function selfDestruct() {
   let cMenuModalBar = document.getElementById("cMenuModalBar");
@@ -547,7 +548,9 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
               await new Promise(resolve => setTimeout(resolve, 100));
               
               updateNotice(`等待 AI 响应...`);
+              const startTime = Date.now();
               const out = await runChat(ai, messages, action.template);
+              const processingTime = Date.now() - startTime;
               
               updateNotice('正在处理结果...');
               if (action.apply === 'replace') {
@@ -558,6 +561,20 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
                 const prefix = (sel.endsWith('\n') ? '' : '\n');
                 editor.replaceRange?.(prefix + out + '\n', pos);
               }
+              
+              // 记录历史
+              addHistoryEntry(
+                action.name,
+                action.template,
+                sel,
+                out,
+                ai.model || 'unknown',
+                {
+                  processingTime,
+                  source: 'menu',
+                  fileType: md.file?.extension
+                }
+              );
               
               recordMRU('ai:'+ action.id, action.name, action.icon, 'cmd');
               
@@ -665,7 +682,25 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
           };
           startRequest();
 
-          const applyReplace = () => { if (!fullText) return; editor.replaceSelection(fullText); ui.wrap.remove(); };
+          const applyReplace = () => { 
+            if (!fullText) return; 
+            editor.replaceSelection(fullText); 
+            
+            // 记录历史
+            addHistoryEntry(
+              action.name,
+              action.template,
+              sel,
+              fullText,
+              ai.model || 'unknown',
+              {
+                source: 'menu',
+                fileType: md.file?.extension
+              }
+            );
+            
+            ui.wrap.remove(); 
+          };
           const applyInsert = () => {
             if (!fullText) return;
             const to = editor.getCursor?.('to') || editor.getCursor?.();
@@ -678,6 +713,20 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
             }
             const prefix = (sel.endsWith('\n') ? '' : '\n');
             editor.replaceRange?.(prefix + payload + '\n', pos);
+            
+            // 记录历史
+            addHistoryEntry(
+              action.name,
+              action.template,
+              sel,
+              fullText,
+              ai.model || 'unknown',
+              {
+                source: 'menu',
+                fileType: md.file?.extension
+              }
+            );
+            
             ui.wrap.remove();
           };
           btnReplace.onClick(applyReplace);

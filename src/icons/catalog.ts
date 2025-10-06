@@ -18,6 +18,7 @@ export const COMMON_ICONS: IconInfo[] = [
   // 编辑相关
   { id: 'wand', name: '魔法棒', aliases: ['magic', 'wand'], tags: ['edit'], source: 'lucide' },
   { id: 'pen', name: '编辑笔', aliases: ['edit', 'pen'], tags: ['edit'], source: 'lucide' },
+  { id: 'pencil', name: '铅笔', aliases: ['write', 'edit', 'continue'], tags: ['edit'], source: 'lucide' },
   { id: 'edit', name: '编辑', aliases: ['edit'], tags: ['edit'], source: 'lucide' },
   { id: 'feather', name: '羽毛笔', aliases: ['write'], tags: ['edit'], source: 'lucide' },
   
@@ -41,6 +42,8 @@ export const COMMON_ICONS: IconInfo[] = [
   { id: 'shield-check', name: '盾牌检查', aliases: ['verify', 'check'], tags: ['verify'], source: 'lucide' },
   { id: 'check-circle', name: '检查圆圈', aliases: ['correct', 'check'], tags: ['verify'], source: 'lucide' },
   { id: 'check', name: '检查', aliases: ['check'], tags: ['verify'], source: 'lucide' },
+  { id: 'help-circle', name: '帮助圆圈', aliases: ['help', 'question', 'explain'], tags: ['help'], source: 'lucide' },
+  { id: 'info', name: '信息', aliases: ['information'], tags: ['help'], source: 'lucide' },
   
   // 插件自定义
   { id: 'cMenuAdd', name: '添加（插件）', aliases: ['add', 'plus'], tags: ['plugin'], source: 'plugin' },
@@ -80,10 +83,14 @@ export const COMMON_ICONS: IconInfo[] = [
   { id: 'phone', name: '电话', aliases: ['call'], tags: ['general'], source: 'lucide' },
   { id: 'home', name: '主页', aliases: ['house'], tags: ['general'], source: 'lucide' },
   { id: 'map-pin', name: '地点', aliases: ['location'], tags: ['general'], source: 'lucide' },
-  { id: 'trending-up', name: '上升', aliases: ['increase'], tags: ['general'], source: 'lucide' },
+  { id: 'trending-up', name: '上升', aliases: ['increase', 'improve'], tags: ['general'], source: 'lucide' },
   { id: 'trending-down', name: '下降', aliases: ['decrease'], tags: ['general'], source: 'lucide' },
   { id: 'pie-chart', name: '饼图', aliases: ['chart'], tags: ['general'], source: 'lucide' },
-  { id: 'bar-chart', name: '柱状图', aliases: ['chart'], tags: ['general'], source: 'lucide' },
+  { id: 'bar-chart', name: '柱状图', aliases: ['chart', 'analysis'], tags: ['general'], source: 'lucide' },
+  { id: 'code', name: '代码', aliases: ['programming', 'coding'], tags: ['general'], source: 'lucide' },
+  { id: 'lightbulb', name: '灯泡', aliases: ['idea', 'creative'], tags: ['general'], source: 'lucide' },
+  { id: 'graduation-cap', name: '毕业帽', aliases: ['education', 'learning'], tags: ['general'], source: 'lucide' },
+  { id: 'briefcase', name: '公文包', aliases: ['business', 'work'], tags: ['general'], source: 'lucide' },
   { id: 'activity', name: '活动', aliases: ['pulse'], tags: ['general'], source: 'lucide' },
   { id: 'award', name: '奖励', aliases: ['prize'], tags: ['general'], source: 'lucide' },
   { id: 'target', name: '目标', aliases: ['aim'], tags: ['general'], source: 'lucide' },

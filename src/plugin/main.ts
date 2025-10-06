@@ -403,6 +403,20 @@ export default class cMenuPlugin extends Plugin {
   async loadSettings() {
     const raw = await this.loadData();
     const merged: cMenuSettings = Object.assign({}, DEFAULT_SETTINGS, raw || {});
+    
+    // 确保 AI设置正确合并
+    if (raw && raw.ai) {
+      merged.ai = Object.assign({}, DEFAULT_SETTINGS.ai, raw.ai);
+    }
+    
+    // 确保 AI动作列表正确初始化
+    if (!raw || !raw.aiActions || !Array.isArray(raw.aiActions) || raw.aiActions.length === 0) {
+      merged.aiActions = DEFAULT_SETTINGS.aiActions.slice(); // 深拷贝
+      console.log('[cMenu] Initialized AI actions with defaults:', merged.aiActions.length, 'actions');
+    } else {
+      console.log('[cMenu] Loaded existing AI actions:', raw.aiActions.length, 'actions');
+    }
+    
     // One-time migration: normalize menuCommands to MenuItem[]
     const normalize = (items: any[]): MenuItem[] => {
       if (!Array.isArray(items)) return DEFAULT_SETTINGS.menuCommands.slice();

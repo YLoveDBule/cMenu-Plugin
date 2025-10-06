@@ -27,15 +27,15 @@ export interface cMenuSettings {
   cMenuButtonScale: number; // em multiplier
   // Phase 1 additions
   cMenuDockMode?: 'follow' | 'fixed';
-  cMenuOverflowMode?: 'wrap' | 'scroll';
   cMenuMaxWidthPct?: number; // 30-100
   // Positioning advanced options
   cMenuAllowTableOverflow?: boolean; // allow menu to overflow editor bounds for tables
-  cMenuCompactInTable?: boolean;     // compact mode when table area is too narrow (future use)
   cMenuFollowGapMin?: number;        // minimal gap for normal selections (defaults to 6)
   cMenuTableGapMin?: number;         // minimal gap for table selections (defaults to 10)
   cMenuTableGapAbove?: number;       // smaller gap when placing above in tables (defaults to 6)
   cMenuUseStartRectVertical?: boolean; // use start-caret rect as vertical baseline
+  cMenuOverflowMode?: string; // overflow handling mode
+  cMenuCompactInTable?: boolean; // compact mode in tables
   // AI assistant settings
   ai?: AISettings;
   aiActions?: AIActionItem[];
@@ -43,7 +43,8 @@ export interface cMenuSettings {
 
 export type AIProvider = 'deepseek' | 'openai';
 export interface AISettings {
-  provider: AIProvider;           // default deepseek
+  // 基本设置
+  provider?: AIProvider;           // deepseek (default) | openai
   baseUrl?: string;               // override base url. deepseek: https://api.deepseek.com
   apiKey?: string;                // secret in local settings
   model?: string;                 // deepseek-chat (default)
@@ -54,15 +55,26 @@ export interface AISettings {
   stream?: boolean;               // enable SSE stream
   previewEnabled?: boolean;       // show preview panel before applying
   previewType?: 'anchored' | 'modal'; // preview panel type
-  mruLimit?: number;              // 最近使用数量（AI 子菜单）
+  mruLimit?: number;              // max recent used items in AI submenu
+  
+  // Phase 2: 性能优化
+  enableCache?: boolean;
+  cacheExpiry?: number;
+  enableStreaming?: boolean;
+  enablePreload?: boolean;
+  maxConcurrent?: number;
+  queueTimeout?: number;
+  retryAttempts?: number;
+  retryDelay?: number;
 }
 
 export interface AIActionItem {
-  id: string;                     // stable id
-  name: string;                   // 菜单显示名
-  icon?: string;                  // 图标名（兼容性不确定时建议留空或用现有 glyph）
-  template: string;               // 用户消息模版，含 {selection}
-  apply: 'replace' | 'insert' | 'quote' | 'code';    // 结果落地方式
+  id: string;
+  name: string;
+  icon: string;
+  template: string;
+  apply: 'replace' | 'insert' | 'quote' | 'code';
+  description?: string;
 }
 
 export const DEFAULT_SETTINGS: cMenuSettings = {
@@ -151,6 +163,34 @@ export const DEFAULT_SETTINGS: cMenuSettings = {
       name: '优化',
       icon: 'bot-glyph',
       template: '请对以下内容进行优化润色，保持原意，尽量简洁清晰:\n\n{selection}',
+      apply: 'replace',
+    },
+    {
+      id: 'ai_translate',
+      name: '翻译文本',
+      icon: 'languages',
+      template: '请将以下文本翻译成中文，保持原文的格式和语气：\n\n{selection}',
+      apply: 'replace',
+    },
+    {
+      id: 'ai_summarize',
+      name: '总结要点',
+      icon: 'list',
+      template: '请总结以下内容的要点，用简洁的条目形式列出：\n\n{selection}',
+      apply: 'insert',
+    },
+    {
+      id: 'ai_explain',
+      name: '解释内容',
+      icon: 'help-circle',
+      template: '请详细解释以下内容，帮助理解其含义和背景：\n\n{selection}',
+      apply: 'insert',
+    },
+    {
+      id: 'ai_improve',
+      name: '改进表达',
+      icon: 'trending-up',
+      template: '请改进以下文本的表达方式，使其更专业、准确和易懂：\n\n{selection}',
       apply: 'replace',
     },
     {
