@@ -2,6 +2,9 @@ import type { cMenuSettings } from "src/settings/settingsData";
 import { runChat, runChatStream } from "src/ai/aiClient";
 import { App, Command, MarkdownView, ButtonComponent, debounce, Notice, MarkdownRenderer, Component } from "obsidian";
 import { IconSizeManager } from "src/components/iconPreview";
+import { ProgressIndicator, showSimpleProgress } from "src/ui/progressIndicator";
+import { StreamRenderer, createOptimizedRenderer } from "src/ai/streamRenderer";
+import { triggerContextualPreload } from "src/ai/preloader";
 import { wait } from "src/util/util";
 import { setBottomValue } from "src/util/statusBarConstants";
 
@@ -519,22 +522,56 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
           if (!sel?.trim()) { new Notice('请先选中一段文本'); return; }
           const ai = (settings as any).ai;
           if (!ai?.apiKey) { new Notice('请先在设置中配置 AI 的 API Key'); return; }
+          
+          // 触发上下文预加载
+          const fileType = md.file?.extension || 'md';
+          const fullContent = editor.getValue?.() || '';
+          triggerContextualPreload(`.${fileType}`, fullContent, sel.length, ai).catch(console.warn);
+          
           const messages = buildMessagesFromTemplate(action.template, sel);
           const wantPreview = (ai?.previewEnabled ?? true);
           const useStream = !!ai?.stream;
           if (!wantPreview) {
-            // 直接落地
-            const out = await runChat(ai, messages);
-            if (action.apply === 'replace') {
-              editor.replaceSelection(out);
-            } else {
-              const to = editor.getCursor?.('to') || editor.getCursor?.();
-              const pos = to || { line: 0, ch: 0 };
-              const prefix = (sel.endsWith('\n') ? '' : '\n');
-              editor.replaceRange?.(prefix + out + '\n', pos);
+            // 直接落地，使用简单通知
+            let progressNotice = new Notice(`正在执行 ${action.name}...`, 0);
+            
+            try {
+              // 更新通知文本
+              const updateNotice = (text: string) => {
+                if (progressNotice && progressNotice.noticeEl) {
+                  progressNotice.noticeEl.textContent = text;
+                }
+              };
+              
+              updateNotice(`正在发送 ${action.name} 请求...`);
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+              updateNotice(`等待 AI 响应...`);
+              const out = await runChat(ai, messages, action.template);
+              
+              updateNotice('正在处理结果...');
+              if (action.apply === 'replace') {
+                editor.replaceSelection(out);
+              } else {
+                const to = editor.getCursor?.('to') || editor.getCursor?.();
+                const pos = to || { line: 0, ch: 0 };
+                const prefix = (sel.endsWith('\n') ? '' : '\n');
+                editor.replaceRange?.(prefix + out + '\n', pos);
+              }
+              
+              recordMRU('ai:'+ action.id, action.name, action.icon, 'cmd');
+              
+              updateNotice('AI 处理完成');
+              setTimeout(() => {
+                if (progressNotice) progressNotice.hide();
+              }, 2000);
+            } catch (error) {
+              if (progressNotice) {
+                progressNotice.noticeEl.textContent = 'AI 处理失败';
+                setTimeout(() => progressNotice.hide(), 3000);
+              }
+              throw error;
             }
-            recordMRU('ai:'+ action.id, action.name, action.icon, 'cmd');
-            new Notice('AI 完成');
             return;
           }
 
@@ -551,30 +588,79 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
 
           let fullText = '';
           let cancelRef: { cancel: () => void } | null = null;
+          let previewProgress: ProgressIndicator | null = null;
+          let streamRenderer: StreamRenderer | null = null;
+          let renderController: any = null;
+          
           const startRequest = () => {
             textEl.textContent = '';
             fullText = '';
+            
+            // 创建进度指示器
+            if (previewProgress) previewProgress.hide();
+            previewProgress = showSimpleProgress(`正在执行 ${action.name}...`);
+            previewProgress.updateProgress('sending', 10, '正在发送请求...');
+            
             if (useStream) {
+              previewProgress.updateProgress('waiting', 30, '等待 AI 响应...');
+              
+              // 创建流式渲染器
+              streamRenderer = createOptimizedRenderer(0); // 初始长度未知
+              const mdView = app.workspace.getActiveViewOfType(MarkdownView);
+              renderController = streamRenderer.startStreaming(ui.body, app, mdView?.file?.path);
+              
               cancelRef = runChatStream(ai, messages, {
-                onDelta: (t: string) => { fullText += t; textEl.textContent = fullText; },
-                onDone: async (f: string) => {
-                  fullText = f; textEl.textContent = '';
-                  // Render markdown when done
-                  ui.body.empty();
-                  const container = createEl('div'); ui.body.appendChild(container);
-                  const mdView = app.workspace.getActiveViewOfType(MarkdownView);
-                  await MarkdownRenderer.render(app, fullText, container, mdView?.file?.path || '', new Component());
+                onDelta: (t: string) => { 
+                  fullText += t;
+                  
+                  // 使用流式渲染器添加块
+                  if (renderController) {
+                    renderController.addChunk(t);
+                  }
+                  
+                  // 根据内容长度更新进度
+                  const progressValue = Math.min(90, 30 + (fullText.length / 10));
+                  previewProgress?.updateProgress('receiving', progressValue, '正在接收数据...');
                 },
-                onError: (e: any) => { new Notice(`AI 失败：${e?.message || e}`); },
+                onDone: async (f: string) => {
+                  fullText = f;
+                  previewProgress?.updateProgress('processing', 95, '正在渲染结果...');
+                  
+                  // 完成流式渲染
+                  if (renderController) {
+                    await renderController.finish();
+                    
+                    // 输出性能统计
+                    const stats = renderController.getStats();
+                    console.log('[StreamRenderer] Performance stats:', stats);
+                  }
+                  
+                  previewProgress?.complete(true, 'AI 处理完成');
+                },
+                onError: (e: any) => { 
+                  if (renderController) {
+                    renderController.cancel();
+                  }
+                  previewProgress?.complete(false, 'AI 处理失败');
+                  new Notice(`AI 失败：${e?.message || e}`); 
+                },
               });
             } else {
-              runChat(ai, messages).then(async (out) => {
+              previewProgress.updateProgress('waiting', 50, '等待 AI 响应...');
+              runChat(ai, messages, action.template).then(async (out) => {
                 fullText = out; textEl.textContent = '';
+                previewProgress?.updateProgress('processing', 90, '正在渲染结果...');
+                
                 ui.body.empty();
                 const container = createEl('div'); ui.body.appendChild(container);
                 const mdView = app.workspace.getActiveViewOfType(MarkdownView);
                 await MarkdownRenderer.render(app, fullText, container, mdView?.file?.path || '', new Component());
-              }).catch((e) => new Notice(`AI 失败：${e?.message || e}`));
+                
+                previewProgress?.complete(true, 'AI 处理完成');
+              }).catch((e) => {
+                previewProgress?.complete(false, 'AI 处理失败');
+                new Notice(`AI 失败：${e?.message || e}`);
+              });
             }
           };
           startRequest();
@@ -597,8 +683,15 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
           btnReplace.onClick(applyReplace);
           btnInsert.onClick(applyInsert);
           btnCopy.onClick(async () => { try { await navigator.clipboard.writeText(fullText); new Notice('已复制'); } catch {} });
-          btnRetry.onClick(() => startRequest());
-          btnCancel.onClick(() => { if (cancelRef) cancelRef.cancel(); ui.wrap.remove(); });
+          btnRetry.onClick(() => {
+            if (previewProgress) previewProgress.hide();
+            startRequest();
+          });
+          btnCancel.onClick(() => { 
+            if (cancelRef) cancelRef.cancel(); 
+            if (previewProgress) previewProgress.hide();
+            ui.wrap.remove(); 
+          });
 
           recordMRU('ai:'+ action.id, action.name, action.icon, 'cmd');
         } catch (e: any) {
