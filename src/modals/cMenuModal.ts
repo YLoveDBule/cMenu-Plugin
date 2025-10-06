@@ -1,5 +1,7 @@
 import type { cMenuSettings } from "src/settings/settingsData";
-import { App, Command, MarkdownView, ButtonComponent, debounce, Notice } from "obsidian";
+import { runChat, runChatStream } from "src/ai/aiClient";
+import { App, Command, MarkdownView, ButtonComponent, debounce, Notice, MarkdownRenderer, Component } from "obsidian";
+import { IconSizeManager } from "src/components/iconPreview";
 import { wait } from "src/util/util";
 import { setBottomValue } from "src/util/statusBarConstants";
 
@@ -430,6 +432,280 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         });
         root.appendChild(wrap);
       };
+
+      // ---- AI helpers ----
+      type AiAction = { id: string; name: string; icon?: string; template: string; apply: 'replace'|'insert'|'quote'|'code' };
+      const buildMessagesFromTemplate = (tpl: string, selectionText: string) => {
+        const ai = (settings as any).ai;
+        const sys = (ai?.systemPrompt?.trim()) || 'You are a helpful writing assistant. Keep output in Markdown.';
+        // Gather extra vars
+        const md = app.workspace.getActiveViewOfType(MarkdownView);
+        const file = md?.file;
+        const title = (file?.basename) || '';
+        const editor: any = md?.editor;
+        const from = editor?.getCursor?.('from');
+        const to = editor?.getCursor?.('to');
+        const getLine = (ln: number) => (editor?.getLine ? (editor.getLine(ln) ?? '') : '');
+        const surroundLines = 3;
+        let surrounding = '';
+        if (from && to) {
+          const start = Math.max(0, from.line - surroundLines);
+          const end = Math.min((editor?.lineCount?.() ?? to.line + surroundLines), to.line + surroundLines);
+          const arr: string[] = [];
+          for (let i=start; i<=end; i++) arr.push(getLine(i));
+          surrounding = arr.join('\n');
+        }
+        const fmObj = file ? (app.metadataCache.getFileCache(file)?.frontmatter || undefined) : undefined;
+        const frontmatter = fmObj ? '---\n' + Object.entries(fmObj).map(([k,v])=> `${k}: ${JSON.stringify(v)}`).join('\n') + '\n---' : '';
+        const user = (tpl || '{selection}')
+          .replace('{selection}', selectionText || '')
+          .replace('{title}', title)
+          .replace('{surrounding}', surrounding)
+          .replace('{frontmatter}', frontmatter);
+        return [ { role: 'system', content: sys }, { role: 'user', content: user } ] as any;
+      };
+
+      const showPreview = (anchorEl: HTMLElement, title: string) => {
+        const ai = (settings as any).ai || {};
+        const type = ai.previewType || 'anchored';
+        // remove existing
+        const old = document.getElementById('cMenuAIPreview');
+        if (old) old.remove();
+        const wrap = createEl('div');
+        wrap.id = 'cMenuAIPreview';
+        wrap.setAttr('role','dialog');
+        const header = createEl('div', { cls: 'cMenuAIPreviewHeader' });
+        header.createEl('span', { text: title });
+        const closeBtn = new ButtonComponent(header);
+        closeBtn.setIcon('x').setTooltip('关闭').onClick(() => wrap.remove());
+        const body = createEl('div', { cls: 'cMenuAIPreviewBody' });
+        const footer = createEl('div', { cls: 'cMenuAIPreviewFooter' });
+        wrap.appendChild(header); wrap.appendChild(body); wrap.appendChild(footer);
+        document.body.appendChild(wrap);
+        const position = () => {
+          if (type === 'anchored') {
+            const r = anchorEl.getBoundingClientRect();
+            const vw = document.documentElement.clientWidth;
+            const left = Math.min(Math.max(8, r.left), vw - 320);
+            wrap.style.left = `${left}px`;
+            wrap.style.top = `${r.bottom + 8}px`;
+          } else {
+            wrap.style.left = `50%`;
+            wrap.style.top = `20%`;
+            wrap.style.transform = 'translateX(-50%)';
+          }
+        };
+        position();
+        const onWinEvt = () => position();
+        window.addEventListener('resize', onWinEvt);
+        window.addEventListener('scroll', onWinEvt, true);
+        const ro = new MutationObserver(() => {
+          if (!document.body.contains(wrap)) {
+            window.removeEventListener('resize', onWinEvt);
+            window.removeEventListener('scroll', onWinEvt, true);
+            ro.disconnect();
+          }
+        });
+        ro.observe(document.body, { childList: true, subtree: true });
+        return { wrap, body, footer } as const;
+      };
+
+      const runAIAction = async (action: AiAction, anchorBtn: HTMLElement) => {
+        try {
+          const md = app.workspace.getActiveViewOfType(MarkdownView);
+          const editor = md?.editor as any;
+          if (!md || !editor) { new Notice('未找到编辑器'); return; }
+          const sel = editor.getSelection?.() || '';
+          if (!sel?.trim()) { new Notice('请先选中一段文本'); return; }
+          const ai = (settings as any).ai;
+          if (!ai?.apiKey) { new Notice('请先在设置中配置 AI 的 API Key'); return; }
+          const messages = buildMessagesFromTemplate(action.template, sel);
+          const wantPreview = (ai?.previewEnabled ?? true);
+          const useStream = !!ai?.stream;
+          if (!wantPreview) {
+            // 直接落地
+            const out = await runChat(ai, messages);
+            if (action.apply === 'replace') {
+              editor.replaceSelection(out);
+            } else {
+              const to = editor.getCursor?.('to') || editor.getCursor?.();
+              const pos = to || { line: 0, ch: 0 };
+              const prefix = (sel.endsWith('\n') ? '' : '\n');
+              editor.replaceRange?.(prefix + out + '\n', pos);
+            }
+            recordMRU('ai:'+ action.id, action.name, action.icon, 'cmd');
+            new Notice('AI 完成');
+            return;
+          }
+
+          // 预览面板
+          const ui = showPreview(anchorBtn, action.name || 'AI 结果');
+          const textEl = createEl('div');
+          textEl.className = 'cMenuAIPreviewContent';
+          ui.body.appendChild(textEl);
+          const btnReplace = new ButtonComponent(ui.footer).setButtonText('替换选区');
+          const btnInsert = new ButtonComponent(ui.footer).setButtonText(action.apply === 'insert' ? '在后插入' : (action.apply === 'quote' ? '插入引用' : (action.apply === 'code' ? '插入代码' : '在后插入')));
+          const btnCopy = new ButtonComponent(ui.footer).setButtonText('复制');
+          const btnRetry = new ButtonComponent(ui.footer).setButtonText('重试');
+          const btnCancel = new ButtonComponent(ui.footer).setButtonText('取消');
+
+          let fullText = '';
+          let cancelRef: { cancel: () => void } | null = null;
+          const startRequest = () => {
+            textEl.textContent = '';
+            fullText = '';
+            if (useStream) {
+              cancelRef = runChatStream(ai, messages, {
+                onDelta: (t: string) => { fullText += t; textEl.textContent = fullText; },
+                onDone: async (f: string) => {
+                  fullText = f; textEl.textContent = '';
+                  // Render markdown when done
+                  ui.body.empty();
+                  const container = createEl('div'); ui.body.appendChild(container);
+                  const mdView = app.workspace.getActiveViewOfType(MarkdownView);
+                  await MarkdownRenderer.render(app, fullText, container, mdView?.file?.path || '', new Component());
+                },
+                onError: (e: any) => { new Notice(`AI 失败：${e?.message || e}`); },
+              });
+            } else {
+              runChat(ai, messages).then(async (out) => {
+                fullText = out; textEl.textContent = '';
+                ui.body.empty();
+                const container = createEl('div'); ui.body.appendChild(container);
+                const mdView = app.workspace.getActiveViewOfType(MarkdownView);
+                await MarkdownRenderer.render(app, fullText, container, mdView?.file?.path || '', new Component());
+              }).catch((e) => new Notice(`AI 失败：${e?.message || e}`));
+            }
+          };
+          startRequest();
+
+          const applyReplace = () => { if (!fullText) return; editor.replaceSelection(fullText); ui.wrap.remove(); };
+          const applyInsert = () => {
+            if (!fullText) return;
+            const to = editor.getCursor?.('to') || editor.getCursor?.();
+            const pos = to || { line: 0, ch: 0 };
+            let payload = fullText;
+            if (action.apply === 'quote') {
+              payload = fullText.split('\n').map(l => l ? `> ${l}` : '>').join('\n');
+            } else if (action.apply === 'code') {
+              payload = '```\n' + fullText + '\n```';
+            }
+            const prefix = (sel.endsWith('\n') ? '' : '\n');
+            editor.replaceRange?.(prefix + payload + '\n', pos);
+            ui.wrap.remove();
+          };
+          btnReplace.onClick(applyReplace);
+          btnInsert.onClick(applyInsert);
+          btnCopy.onClick(async () => { try { await navigator.clipboard.writeText(fullText); new Notice('已复制'); } catch {} });
+          btnRetry.onClick(() => startRequest());
+          btnCancel.onClick(() => { if (cancelRef) cancelRef.cancel(); ui.wrap.remove(); });
+
+          recordMRU('ai:'+ action.id, action.name, action.icon, 'cmd');
+        } catch (e: any) {
+          console.error('AI 调用失败', e);
+          new Notice(`AI 调用失败：${e?.message || e}`);
+        }
+      };
+
+      const renderAIMenu = (root: HTMLElement) => {
+        const groupBtn = new ButtonComponent(root);
+        groupBtn
+          .setIcon('sparkles')
+          .setClass('cMenuCommandItem')
+          .setTooltip('AI')
+          .onClick(() => {
+            // toggle submenu
+            submenu.style.display = (submenu.style.display === 'block') ? 'none' : 'block';
+            groupBtn.buttonEl.setAttribute('aria-expanded', submenu.style.display === 'block' ? 'true' : 'false');
+          });
+        groupBtn.buttonEl.setAttribute('aria-haspopup', 'menu');
+        groupBtn.buttonEl.setAttribute('aria-expanded', 'false');
+
+        const submenu = createEl('div', { cls: 'cMenuSubmenu' });
+        submenu.style.position = 'absolute';
+        submenu.style.display = 'none';
+        submenu.style.zIndex = 'var(--layer-tooltip)';
+        document.body.appendChild(submenu);
+
+        // actions row (horizontal)
+        const actionsRow = createEl('div', { cls: 'cMenuActionsRow' });
+        submenu.appendChild(actionsRow);
+
+        const position = () => {
+          const r = groupBtn.buttonEl.getBoundingClientRect();
+          submenu.style.left = `${Math.max(8, r.left)}px`;
+          submenu.style.top = `${r.bottom + 6}px`;
+        };
+        groupBtn.buttonEl.addEventListener('mouseenter', position);
+        groupBtn.buttonEl.addEventListener('click', position);
+
+        const addSubBtn = (label: string, icon: string, handler: () => void) => {
+          const sizeManager = IconSizeManager.getInstance();
+          const b = sizeManager.createUnifiedIconButton(actionsRow, icon, 'medium');
+          b.setClass('cMenuCommandItem');
+          b.setTooltip(label);
+          b.onClick(async () => { submenu.style.display = 'none'; await handler(); });
+          b.buttonEl.setAttribute('role','menuitem');
+        };
+
+        // 动态渲染动作（去重：移除“AI前缀”的重复项）
+        const rawActions: AiAction[] = ((settings as any).aiActions || []).map((a: any) => ({ id: a.id, name: a.name, icon: a.icon || 'bot-glyph', template: a.template || '{selection}', apply: (a.apply || 'replace') }));
+        const normalizeName = (s: string) => (s || '').replace(/^AI[:：]?\s*/i, '').trim();
+        const seen = new Set<string>();
+        const actions: AiAction[] = [];
+        for (const a of rawActions) {
+          const key = normalizeName(a.name || a.id);
+          if (!seen.has(key)) { seen.add(key); actions.push(a); }
+        }
+        const actionById: Record<string, AiAction> = Object.fromEntries(actions.map(a => [a.id, a]));
+
+        // MRU（并入同一行）
+        try {
+          const all = Object.values(loadMRU()) as any[];
+          const aiOnly = all.filter((x) => typeof x?.id === 'string' && x.id.startsWith('ai:'))
+            .sort((a,b)=> (b.lastUsed - a.lastUsed) || (b.count - a.count))
+            .slice(0, Math.max(0, Math.min(12, Number((settings as any).ai?.mruLimit ?? 6))))
+            .map((it) => ({ it, act: actionById[it.id.slice(3)] }))
+            .filter((x) => !!x.act);
+          if (aiOnly.length) {
+            const label = createEl('span', { text: '最近', cls: 'cMenuActionsLabel' });
+            actionsRow.appendChild(label);
+            aiOnly.forEach(({ act }) => {
+              const sizeManager = IconSizeManager.getInstance();
+              const b = sizeManager.createUnifiedIconButton(actionsRow, act.icon || 'bot-glyph', 'medium');
+              b.setClass('cMenuCommandItem').setTooltip(act.name || 'AI');
+              b.onClick(async () => { submenu.style.display = 'none'; await runAIAction(act, groupBtn.buttonEl); });
+            });
+            const sep = createEl('div', { cls: 'cMenuActionsSep' }); actionsRow.appendChild(sep);
+          }
+        } catch {}
+
+        // 渲染动作按钮（去重后）
+        actions.forEach((act) => addSubBtn(act.name, act.icon || 'bot-glyph', () => runAIAction(act, groupBtn.buttonEl)));
+        
+        // 确保图标一致性
+        setTimeout(() => {
+          const sizeManager = IconSizeManager.getInstance();
+          sizeManager.ensureIconConsistency(actionsRow);
+        }, 0);
+
+        // hide submenu on outside click
+        const onDocClick = (ev: MouseEvent) => {
+          if (submenu.style.display !== 'block') return;
+          const t = ev.target as Node;
+          if (!submenu.contains(t) && t !== groupBtn.buttonEl) submenu.style.display = 'none';
+        };
+        document.addEventListener('click', onDocClick);
+        // cleanup on detach
+        const observer = new MutationObserver(() => {
+          if (!document.body.contains(groupBtn.buttonEl)) {
+            document.removeEventListener('click', onDocClick);
+            observer.disconnect();
+            submenu.remove();
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      };
       // Helper: render a group button with hover/long-press submenu
       const renderGroup = (root: HTMLElement, group: any) => {
         const groupBtn = new ButtonComponent(root);
@@ -654,8 +930,8 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
         }
       };
 
-      // MRU section first
-      renderMRU(cMenu);
+      // 仅渲染 AI（MRU 放入 AI 子菜单里）
+      renderAIMenu(cMenu);
 
       settings.menuCommands.forEach((item) => {
         const anyItem = item as any;
@@ -738,6 +1014,8 @@ export function cMenuPopover(app: App, settings: cMenuSettings): void {
       } else {
         document.dispatchEvent(new Event('selectionchange'));
       }
+      // 标记菜单尺寸为脏，下一次选择变动时重新测量
+      try { (__menuSizeDirty as any) = true; } catch {}
     });
     ro.observe(editorBoundsEl);
     (window as any).__cMenuResizeObserverRef = ro;

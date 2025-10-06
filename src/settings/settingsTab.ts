@@ -1,14 +1,17 @@
 import type cMenuPlugin from "src/plugin/main";
 import { CommandPicker, MacroPicker } from "src/modals/suggesterModals";
-import { App, Setting, PluginSettingTab } from "obsidian";
+import { App, Setting, PluginSettingTab, ButtonComponent } from "obsidian";
 import { AESTHETIC_STYLES, MenuItem, GroupItem, MacroItem } from "src/settings/settingsData";
 import { setBottomValue } from "src/util/statusBarConstants";
 import { selfDestruct, cMenuPopover } from "src/modals/cMenuModal";
 import Sortable from "sortablejs";
 import { debounce } from "obsidian";
+import { searchIcons, getSuggestedIcons, validateIcon, getIconInfo, COMMON_ICONS } from "src/icons/catalog";
+import { IconPickerModal } from "src/modals/iconPickerModal";
 
 export class cMenuSettingTab extends PluginSettingTab {
   plugin: cMenuPlugin;
+  private currentTabKey: string | null = null;
 
   constructor(app: App, plugin: cMenuPlugin) {
     super(app, plugin);
@@ -34,6 +37,7 @@ export class cMenuSettingTab extends PluginSettingTab {
     const sections: Record<string, HTMLElement> = {
       appearance: body.createDiv({ cls: 'cMenu-settings-tab' }),
       commands: body.createDiv({ cls: 'cMenu-settings-tab' }),
+      ai: body.createDiv({ cls: 'cMenu-settings-tab' }),
       about: body.createDiv({ cls: 'cMenu-settings-tab' }),
     };
 
@@ -44,6 +48,7 @@ export class cMenuSettingTab extends PluginSettingTab {
       tabBtns.forEach(({ key: k, btn }) => {
         if (k === key) btn.addClass('is-active'); else btn.removeClass('is-active');
       });
+      this.currentTabKey = key as string;
     };
 
     const addTabBtn = (key: keyof typeof sections, label: string) => {
@@ -54,6 +59,7 @@ export class cMenuSettingTab extends PluginSettingTab {
 
     addTabBtn('appearance', '外观');
     addTabBtn('commands', '命令与分组');
+    addTabBtn('ai', 'AI 助手');
     addTabBtn('about', '关于');
 
     // ========== 外观 ==========
@@ -547,6 +553,451 @@ export class cMenuSettingTab extends PluginSettingTab {
 
     (this.plugin.settings.menuCommands as MenuItem[]).forEach(renderTopLevelItem);
 
+    // ========== AI 助手 ==========
+    const aiEl = sections.ai;
+    aiEl.createEl('h3', { text: 'AI 助手' });
+
+    new Setting(aiEl)
+      .setName('Provider')
+      .setDesc('选择 AI 提供商（默认 DeepSeek，OpenAI 兼容接口）。')
+      .addDropdown((dd) => {
+        const options: Record<string, string> = { deepseek: 'deepseek', openai: 'openai' };
+        dd.addOptions(options)
+          .setValue(this.plugin.settings.ai?.provider ?? 'deepseek')
+          .onChange(
+            debounce(async (value: string) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).provider = value as any;
+              await this.plugin.saveSettings();
+            }, 100, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('Base URL')
+      .setDesc('可选：覆盖默认的 API Base URL。DeepSeek 缺省为 https://api.deepseek.com')
+      .addText((t) => {
+        t.setPlaceholder('https://api.deepseek.com')
+          .setValue(this.plugin.settings.ai?.baseUrl ?? '')
+          .onChange(
+            debounce(async (v) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).baseUrl = v;
+              await this.plugin.saveSettings();
+            }, 200, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('API Key')
+      .setDesc('不会写入文档，仅保存在本地设置。')
+      .addText((t) => {
+        (t.inputEl as HTMLInputElement).type = 'password';
+        t.setPlaceholder('sk-...')
+          .setValue(this.plugin.settings.ai?.apiKey ?? '')
+          .onChange(
+            debounce(async (v) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).apiKey = v;
+              await this.plugin.saveSettings();
+            }, 200, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('Model')
+      .setDesc('DeepSeek 默认 deepseek-chat。')
+      .addText((t) => {
+        t.setPlaceholder('deepseek-chat')
+          .setValue(this.plugin.settings.ai?.model ?? 'deepseek-chat')
+          .onChange(
+            debounce(async (v) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).model = v;
+              await this.plugin.saveSettings();
+            }, 200, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('System Prompt')
+      .setDesc('全局系统提示（可用于约束输出格式与风格）。')
+      .addTextArea((ta) => {
+        ta.setPlaceholder('You are a helpful writing assistant...')
+          .setValue(this.plugin.settings.ai?.systemPrompt ?? '')
+          .onChange(
+            debounce(async (v) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).systemPrompt = v;
+              await this.plugin.saveSettings();
+            }, 300, true)
+          );
+        ta.inputEl.rows = 4;
+      });
+
+    new Setting(aiEl)
+      .setName('Temperature')
+      .setDesc('创意度（0-2）。')
+      .addSlider((s) => {
+        s.setLimits(0, 2, 0.1)
+          .setValue(this.plugin.settings.ai?.temperature ?? 0.7)
+          .onChange(
+            debounce(async (v: number) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).temperature = v;
+              await this.plugin.saveSettings();
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    new Setting(aiEl)
+      .setName('Max Tokens')
+      .setDesc('最大输出 tokens（可留空）。')
+      .addText((t) => {
+        t.setPlaceholder('800')
+          .setValue(String(this.plugin.settings.ai?.maxTokens ?? ''))
+          .onChange(
+            debounce(async (v) => {
+              const n = Number(v);
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).maxTokens = Number.isFinite(n) ? n : undefined;
+              await this.plugin.saveSettings();
+            }, 200, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('Timeout (ms)')
+      .setDesc('请求超时（毫秒）。')
+      .addText((t) => {
+        t.setPlaceholder('30000')
+          .setValue(String(this.plugin.settings.ai?.timeoutMs ?? 30000))
+          .onChange(
+            debounce(async (v) => {
+              const n = Number(v);
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).timeoutMs = Number.isFinite(n) ? n : 30000;
+              await this.plugin.saveSettings();
+            }, 200, true)
+          );
+      });
+
+    // 流式输出开关
+    new Setting(aiEl)
+      .setName('启用流式输出')
+      .setDesc('默认关闭（非流式）。打开后结果将流式显示到预览面板。')
+      .addToggle((tg) => {
+        tg.setValue(!!this.plugin.settings.ai?.stream)
+          .onChange(
+            debounce(async (v: boolean) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).stream = v;
+              await this.plugin.saveSettings();
+            }, 100, true)
+          );
+      });
+
+    // 预览开关与类型
+    new Setting(aiEl)
+      .setName('启用结果预览')
+      .setDesc('在应用到文档之前，先在面板中预览 AI 结果。')
+      .addToggle((tg) => {
+        tg.setValue(this.plugin.settings.ai?.previewEnabled ?? true)
+          .onChange(
+            debounce(async (v: boolean) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).previewEnabled = v;
+              await this.plugin.saveSettings();
+            }, 100, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('预览面板类型')
+      .setDesc('选择预览面板的展现方式。建议使用“锚定主栏”')
+      .addDropdown((dd) => {
+        dd.addOptions({ anchored: 'anchored（锚定主栏）', modal: 'modal（居中弹出）' })
+          .setValue(this.plugin.settings.ai?.previewType ?? 'anchored')
+          .onChange(
+            debounce(async (v: string) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).previewType = (v as any);
+              await this.plugin.saveSettings();
+            }, 100, true)
+          );
+      });
+
+    new Setting(aiEl)
+      .setName('最近使用数量')
+      .setDesc('AI 子菜单中显示的“最近使用”最大个数（0-12）')
+      .addSlider((s) => {
+        s.setLimits(0, 12, 1)
+          .setValue(this.plugin.settings.ai?.mruLimit ?? 6)
+          .onChange(
+            debounce(async (v: number) => {
+              this.plugin.settings.ai = this.plugin.settings.ai || ({} as any);
+              (this.plugin.settings.ai as any).mruLimit = v;
+              await this.plugin.saveSettings();
+            }, 100, true)
+          )
+          .setDynamicTooltip();
+      });
+
+    // ---- AI 动作列表（自定义二级菜单） ----
+    aiEl.createEl('h4', { text: 'AI 动作列表（可自定义二级菜单）' });
+    const aiActions = (this.plugin.settings.aiActions || []) as any[];
+    const actionsContainer = aiEl.createDiv({ cls: 'cMenuSettingsTabsContainer' });
+    const renderAction = (action: any) => {
+      const item = new Setting(actionsContainer)
+        .setClass('cMenuCommandItem')
+        .setName(action.name || action.id || 'AI 动作')
+        .setDesc('名称、图标、落地方式与模版');
+      item.addText((t) => {
+        t.setPlaceholder('名称').setValue(action.name || '').onChange(
+          debounce(async (v) => { action.name = v; await this.plugin.saveSettings(); }, 200, true)
+        );
+      });
+      // 图标输入：带预览、自动完成、推荐
+      const iconContainer = item.controlEl.createDiv({ cls: 'cMenuIconInputContainer' });
+      
+      // 先创建输入框
+      const inputWrapper = iconContainer.createDiv({ cls: 'cMenuIconInputWrapper' });
+      const input = inputWrapper.createEl('input', { 
+        type: 'text', 
+        placeholder: '图标 ID（可留空）',
+        cls: 'cMenuIconInput'
+      });
+      input.value = action.icon || '';
+      
+      // 简化的图标预览（避免复杂组件导致的问题）
+      const previewContainer = iconContainer.createDiv({ cls: 'cMenuIconPreviewWrapper' });
+      const iconPreviewBtn = new ButtonComponent(previewContainer);
+      iconPreviewBtn.setClass('cMenuIconPreview');
+      iconPreviewBtn.setDisabled(true);
+      
+      const updatePreview = (iconId: string) => {
+        if (iconId && validateIcon(iconId)) {
+          iconPreviewBtn.setIcon(iconId);
+          iconPreviewBtn.buttonEl.style.opacity = '1';
+        } else if (iconId) {
+          iconPreviewBtn.setIcon('bot-glyph'); // 回退图标
+          iconPreviewBtn.buttonEl.style.opacity = '0.5';
+        } else {
+          iconPreviewBtn.setIcon('bot-glyph');
+          iconPreviewBtn.buttonEl.style.opacity = '0.3';
+        }
+      };
+      
+      updatePreview(action.icon || '');
+      
+      const iconPreview = {
+        setIcon: updatePreview
+      };
+      
+      // 选择图标按钮
+      const selectBtn = new ButtonComponent(inputWrapper);
+      selectBtn.setButtonText('选择').setClass('cMenuIconSelectBtn');
+      selectBtn.onClick(() => {
+        const modal = new IconPickerModal(this.app, {
+          currentIcon: action.icon,
+          onSelect: (iconId: string) => {
+            input.value = iconId;
+            action.icon = iconId;
+            iconPreview.setIcon(iconId);
+            this.plugin.saveSettings();
+          }
+        });
+        modal.open();
+      });
+      
+      // 自动完成下拉
+      const dropdown = inputWrapper.createDiv({ cls: 'cMenuIconDropdown' });
+      dropdown.style.display = 'none';
+      
+      let currentSuggestions: any[] = [];
+      const showDropdown = (suggestions: any[]) => {
+        dropdown.empty();
+        currentSuggestions = suggestions;
+        if (suggestions.length === 0) {
+          dropdown.style.display = 'none';
+          return;
+        }
+        
+        suggestions.forEach((icon, idx) => {
+          const item = dropdown.createDiv({ cls: 'cMenuIconDropdownItem' });
+          const iconBtn = new ButtonComponent(item);
+          iconBtn.setIcon(icon.id).setClass('cMenuIconDropdownIcon');
+          item.createSpan({ text: icon.name, cls: 'cMenuIconDropdownName' });
+          item.createSpan({ text: icon.id, cls: 'cMenuIconDropdownId' });
+          
+          item.addEventListener('click', () => {
+            input.value = icon.id;
+            action.icon = icon.id;
+            iconPreview.setIcon(icon.id);
+            dropdown.style.display = 'none';
+            this.plugin.saveSettings();
+          });
+          
+          if (idx === 0) item.addClass('is-selected');
+        });
+        
+        dropdown.style.display = 'block';
+      };
+      
+      const hideDropdown = () => {
+        setTimeout(() => dropdown.style.display = 'none', 150);
+      };
+      
+      // 输入事件
+      input.addEventListener('input', debounce(() => {
+        const query = input.value.trim();
+        action.icon = query;
+        iconPreview.setIcon(query);
+        
+        if (query) {
+          const suggestions = searchIcons(query, 8);
+          showDropdown(suggestions);
+        } else {
+          hideDropdown();
+        }
+        
+        this.plugin.saveSettings();
+      }, 200, true));
+      
+      input.addEventListener('focus', () => {
+        if (input.value.trim()) {
+          const suggestions = searchIcons(input.value.trim(), 8);
+          showDropdown(suggestions);
+        } else {
+          showDropdown(COMMON_ICONS.slice(0, 8));
+        }
+      });
+      
+      input.addEventListener('blur', hideDropdown);
+      
+      // 键盘导航
+      let selectedIndex = -1;
+      input.addEventListener('keydown', (e) => {
+        if (dropdown.style.display === 'none') return;
+        
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          selectedIndex = Math.min(selectedIndex + 1, currentSuggestions.length - 1);
+          updateSelection();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          selectedIndex = Math.max(selectedIndex - 1, -1);
+          updateSelection();
+        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+          e.preventDefault();
+          const selected = currentSuggestions[selectedIndex];
+          if (selected) {
+            input.value = selected.id;
+            action.icon = selected.id;
+            iconPreview.setIcon(selected.id);
+            dropdown.style.display = 'none';
+            this.plugin.saveSettings();
+          }
+        } else if (e.key === 'Escape') {
+          dropdown.style.display = 'none';
+        }
+      });
+      
+      const updateSelection = () => {
+        const items = dropdown.querySelectorAll('.cMenuIconDropdownItem');
+        items.forEach((item, idx) => {
+          if (idx === selectedIndex) {
+            item.addClass('is-selected');
+          } else {
+            item.removeClass('is-selected');
+          }
+        });
+      };
+      
+      // 推荐图标按钮
+      const suggestionsContainer = iconContainer.createDiv({ cls: 'cMenuIconSuggestions' });
+      const updateSuggestions = () => {
+        suggestionsContainer.empty();
+        const suggestions = getSuggestedIcons(action.name || '');
+        if (suggestions.length > 0) {
+          suggestionsContainer.createSpan({ text: '推荐：', cls: 'cMenuIconSuggestionsLabel' });
+          suggestions.slice(0, 4).forEach(iconId => {
+            const btn = new ButtonComponent(suggestionsContainer);
+            btn.setIcon(iconId).setClass('cMenuIconSuggestionBtn').setTooltip(iconId);
+            btn.onClick(() => {
+              input.value = iconId;
+              action.icon = iconId;
+              iconPreview.setIcon(iconId);
+              this.plugin.saveSettings();
+            });
+          });
+        }
+      };
+      updateSuggestions();
+      
+      // 监听名称变化以更新推荐
+      const nameInput = item.controlEl.querySelector('input[placeholder="名称"]') as HTMLInputElement;
+      if (nameInput) {
+        nameInput.addEventListener('input', debounce(() => {
+          updateSuggestions();
+        }, 300, true));
+      }
+      item.addDropdown((dd) => {
+        dd.addOptions({ replace: '替换选区', insert: '在选区后插入', quote: '插入为引用块', code: '插入为代码块' })
+          .setValue(action.apply || 'replace')
+          .onChange(
+            debounce(async (v: string) => { action.apply = (v as any); await this.plugin.saveSettings(); }, 100, true)
+          );
+      });
+      item.addButton((del) => {
+        del.setIcon('cMenuDelete').setTooltip('删除').setClass('cMenuSettingsButton').setClass('cMenuSettingsButtonDelete')
+          .onClick(async () => {
+            const idx = aiActions.indexOf(action);
+            if (idx >= 0) aiActions.splice(idx, 1);
+            this.plugin.settings.aiActions = aiActions as any;
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+      const templateSetting = new Setting(actionsContainer)
+        .setClass('cMenuCommandItem')
+        .setName('模版')
+        .setDesc('可使用 {selection}、{title}、{surrounding}、{frontmatter}');
+      templateSetting.addTextArea((ta) => {
+        ta.setValue(action.template || '')
+          .onChange(
+            debounce(async (v) => { action.template = v; await this.plugin.saveSettings(); }, 300, true)
+          );
+        ta.inputEl.rows = 4;
+      });
+    };
+    aiActions.forEach(renderAction);
+    // 拖拽排序
+    Sortable.create(actionsContainer, {
+      animation: 300,
+      ghostClass: 'sortable-ghost',
+      onSort: (evt) => {
+        const [removed] = aiActions.splice(evt.oldIndex, 1);
+        aiActions.splice(evt.newIndex, 0, removed);
+        this.plugin.settings.aiActions = aiActions as any;
+        this.plugin.saveSettings();
+      },
+    });
+    // 添加动作按钮
+    new Setting(aiEl)
+      .setName('添加 AI 动作')
+      .setDesc('新增一个自定义的 AI 二级菜单动作')
+      .addButton((btn) => {
+        btn.setIcon('cMenuAdd').setClass('cMenuSettingsButton').onClick(async () => {
+          const action = { id: `ai_custom_${Date.now()}`, name: '新动作', icon: 'bot-glyph', template: '{selection}', apply: 'replace' } as any;
+          aiActions.push(action);
+          this.plugin.settings.aiActions = aiActions as any;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
     // ========== 关于 ==========
     const aboutEl = sections.about;
     aboutEl.createEl('h3', { text: '关于' });
@@ -558,9 +1009,12 @@ export class cMenuSettingTab extends PluginSettingTab {
     meta.createEl('p', { text: '如果你喜欢这个插件并希望支持持续开发，可以点击下方按钮赞助。' });
     aboutEl.appendChild(createDonateButton('https://www.buymeacoffee.com/chetachi'));
 
-    // 默认选中第一个标签页
-    const firstKey = Object.keys(sections)[0] as keyof typeof sections;
-    switchTo(firstKey);
+    // 恢复上次激活的标签页（若无则选第一个）
+    const fallbackKey = Object.keys(sections)[0] as keyof typeof sections;
+    const initialKey = (this.currentTabKey && (this.currentTabKey in sections))
+      ? (this.currentTabKey as keyof typeof sections)
+      : fallbackKey;
+    switchTo(initialKey);
   }
 }
 

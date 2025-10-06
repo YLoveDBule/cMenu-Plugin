@@ -55,9 +55,668 @@ CMENU TOOLBAR
 /* Submenu container for group items */
 .cMenuSubmenu {
   border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  box-shadow: 0px 3px 32px rgb(31 38 135 / 15%);
+  border-radius: 8px;
+  box-shadow: 0px 8px 28px rgba(31, 38, 135, 0.18);
   background-color: var(--background-primary);
+  padding: 8px 10px;
+  min-width: 240px;
+  max-width: min(90vw, 760px);
+}
+
+.cMenuSubmenu .cMenuCommandItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 7px;
+  margin: 3px 2px;
+  border-radius: 6px;
+}
+
+.cMenuSubmenu .cMenuCommandItem:hover {
+  background: var(--background-secondary);
+}
+
+.cMenuSubmenu .cMenuCommandItem svg {
+  width: 1.2em;
+  height: 1.2em;
+}
+
+/* Actions row: 横向布局，可换行 */
+.cMenuActionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 6px; /* row-gap column-gap */
+  padding: 4px 8px;
+  align-items: center;
+}
+
+.cMenuActionsLabel {
+  color: var(--text-faint);
+  margin: 0 6px 0 0;
+  font-size: 12px;
+}
+
+.cMenuActionsSep {
+  width: 1px;
+  height: 18px;
+  background: var(--background-modifier-border);
+  margin: 0 6px;
+  opacity: .7;
+}
+
+/* AI 预览面板 */
+#cMenuAIPreview {
+  position: fixed;
+  max-width: min(70vw, 760px);
+  width: 90%;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 36px rgba(0,0,0,.18);
+  padding: 10px;
+  z-index: var(--layer-tooltip);
+}
+
+#cMenuAIPreview .cMenuAIPreviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+#cMenuAIPreview .cMenuAIPreviewBody {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+#cMenuAIPreview .cMenuAIPreviewFooter {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/*----------------------------------------------------------------
+CMENU ICON INPUT COMPONENTS
+----------------------------------------------------------------*/
+
+/* 图标输入容器 */
+.cMenuIconInputContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 预览和输入框行 */
+.cMenuIconInputWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 图标预览按钮 */
+.cMenuIconPreview {
+  min-width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cMenuIconPreview svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* 图标输入框 */
+.cMenuIconInput {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+
+.cMenuIconInput:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+/* 选择图标按钮 */
+.cMenuIconSelectBtn {
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cMenuIconSelectBtn:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* 自动完成下拉 */
+.cMenuIconDropdown {
+  position: absolute;
+  top: 100%;
+  left: 40px; /* 跳过预览按钮 */
+  right: 0;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: var(--layer-popover);
+}
+
+.cMenuIconDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+}
+
+.cMenuIconDropdownItem:last-child {
+  border-bottom: none;
+}
+
+.cMenuIconDropdownItem:hover,
+.cMenuIconDropdownItem.is-selected {
+  background: var(--background-secondary);
+}
+
+.cMenuIconDropdownIcon {
+  min-width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.cMenuIconDropdownIcon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cMenuIconDropdownName {
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.cMenuIconDropdownId {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: auto;
+}
+
+/* 推荐图标区域 */
+.cMenuIconSuggestions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cMenuIconSuggestionsLabel {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-right: 4px;
+}
+
+.cMenuIconSuggestionBtn {
+  min-width: 28px;
+  height: 28px;
+  padding: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+}
+
+.cMenuIconSuggestionBtn:hover {
+  background: var(--background-secondary-alt);
+  border-color: var(--interactive-accent);
+}
+
+.cMenuIconSuggestionBtn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 校验提示 */
+.cMenuIconValidation {
+  min-height: 16px;
+}
+
+.cMenuIconValidationError {
+  font-size: 11px;
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-error-border);
+}
+
+/*----------------------------------------------------------------
+CMENU ICON PICKER MODAL
+----------------------------------------------------------------*/
+
+.cMenuIconPickerModal {
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+.cMenuIconPickerModal .modal-content {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+/* 搜索栏 */
+.cMenuIconPickerSearch {
+  display: flex;
+  gap: 8px;
+}
+
+.cMenuIconPickerSearchInput {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.cMenuIconPickerSearchInput:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+/* 分类筛选 */
+.cMenuIconPickerFilters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cMenuIconPickerFilterBtn {
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 16px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.cMenuIconPickerFilterBtn:hover {
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+}
+
+.cMenuIconPickerFilterBtn.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* 图标网格 */
+.cMenuIconPickerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.cMenuIconPickerItem {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--background-primary);
+  border: 2px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.cMenuIconPickerItem:hover {
+  background: var(--background-primary-alt);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.cMenuIconPickerItem.is-current {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent-hover);
+}
+
+.cMenuIconPickerItem.is-favorite::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  background: var(--text-accent);
+  border-radius: 50%;
+}
+
+.cMenuIconPickerItemIcon {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.cMenuIconPickerItemIcon:hover {
+  background: var(--background-modifier-hover);
+}
+
+.cMenuIconPickerItemIcon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.cMenuIconPickerItemFavorite {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  border: none;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.cMenuIconPickerItem:hover .cMenuIconPickerItemFavorite {
+  opacity: 1;
+}
+
+.cMenuIconPickerItem.is-favorite .cMenuIconPickerItemFavorite {
+  opacity: 1;
+  background: var(--text-accent);
+  color: white;
+}
+
+.cMenuIconPickerItemFavorite svg {
+  width: 12px;
+  height: 12px;
+}
+
+.cMenuIconPickerItemLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cMenuIconPickerItemBadge {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  font-size: 8px;
+  padding: 1px 4px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: 3px;
+}
+
+.cMenuIconPickerEmpty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 20px;
+  font-size: 14px;
+}
+
+/* 底部按钮 */
+.cMenuIconPickerFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/*----------------------------------------------------------------
+CMENU ICON PREVIEW COMPONENT
+----------------------------------------------------------------*/
+
+/* 图标预览容器 */
+.cMenuIconPreviewContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cMenuIconPreviewArea {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+/* 主题切换效果 */
+.cMenuIconPreviewContainer.theme-light {
+  --preview-bg: #ffffff;
+  --preview-text: #2e3338;
+  --preview-border: #e1e4e8;
+}
+
+.cMenuIconPreviewContainer.theme-dark {
+  --preview-bg: #1e1e1e;
+  --preview-text: #cccccc;
+  --preview-border: #3e3e3e;
+}
+
+.cMenuIconPreviewContainer.theme-light .cMenuIconPreviewButton,
+.cMenuIconPreviewContainer.theme-dark .cMenuIconPreviewButton {
+  background: var(--preview-bg) !important;
+  color: var(--preview-text) !important;
+  border-color: var(--preview-border) !important;
+}
+
+/* 预览按钮 */
+.cMenuIconPreviewButton {
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.cMenuIconPreviewButton.size-small {
+  min-width: 24px;
+  height: 24px;
+  padding: 2px;
+}
+
+.cMenuIconPreviewButton.size-medium {
+  min-width: 32px;
+  height: 32px;
+  padding: 4px;
+}
+
+.cMenuIconPreviewButton.size-large {
+  min-width: 40px;
+  height: 40px;
+  padding: 6px;
+}
+
+.cMenuIconPreviewButton.size-small svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cMenuIconPreviewButton.size-medium svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cMenuIconPreviewButton.size-large svg {
+  width: 28px;
+  height: 28px;
+}
+
+/* 主题切换按钮 */
+.cMenuIconPreviewThemeToggle {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+}
+
+.cMenuIconPreviewThemeBtn {
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  background: var(--background-primary);
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.cMenuIconPreviewThemeBtn:hover {
+  opacity: 1;
+}
+
+.cMenuIconPreviewThemeBtn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 校验提示 */
+.cMenuIconPreviewValidation {
+  min-height: 16px;
+  font-size: 11px;
+}
+
+.cMenuIconPreviewError {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--background-modifier-error-border);
+}
+
+.cMenuIconPreviewSuccess {
+  color: var(--text-success);
+  background: var(--background-modifier-success);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--background-modifier-success-border);
+}
+
+/*----------------------------------------------------------------
+CMENU UNIFIED ICON SYSTEM
+----------------------------------------------------------------*/
+
+/* 统一图标系统 */
+.cMenuUnifiedIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+.cMenuUnifiedIcon svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* 尺寸级别 */
+.cMenuUnifiedIcon-small svg {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px;
+  min-height: 16px;
+}
+
+.cMenuUnifiedIcon-medium svg {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px;
+  min-height: 20px;
+}
+
+.cMenuUnifiedIcon-large svg {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.cMenuUnifiedIcon-xlarge svg {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+/* 高对比度模式支持 */
+@media (prefers-contrast: high) {
+  .cMenuIconPreviewButton,
+  .cMenuUnifiedIcon {
+    border: 2px solid var(--text-normal);
+  }
+  
+  .cMenuIconPreviewError {
+    border-width: 2px;
+    font-weight: 600;
+  }
+  
+  .cMenuIconPreviewSuccess {
+    border-width: 2px;
+    font-weight: 600;
+  }
+}
+
+/* 减少动画模式 */
+@media (prefers-reduced-motion: reduce) {
+  .cMenuIconPreviewButton,
+  .cMenuIconPreviewThemeBtn,
+  .cMenuUnifiedIcon {
+    transition: none;
+  }
 }
 
 /*----------------------------------------------------------------

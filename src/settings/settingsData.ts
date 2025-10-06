@@ -36,6 +36,33 @@ export interface cMenuSettings {
   cMenuTableGapMin?: number;         // minimal gap for table selections (defaults to 10)
   cMenuTableGapAbove?: number;       // smaller gap when placing above in tables (defaults to 6)
   cMenuUseStartRectVertical?: boolean; // use start-caret rect as vertical baseline
+  // AI assistant settings
+  ai?: AISettings;
+  aiActions?: AIActionItem[];
+}
+
+export type AIProvider = 'deepseek' | 'openai';
+export interface AISettings {
+  provider: AIProvider;           // default deepseek
+  baseUrl?: string;               // override base url. deepseek: https://api.deepseek.com
+  apiKey?: string;                // secret in local settings
+  model?: string;                 // deepseek-chat (default)
+  systemPrompt?: string;          // global system prompt
+  timeoutMs?: number;             // default 30000
+  temperature?: number;           // 0-2
+  maxTokens?: number;             // optional
+  stream?: boolean;               // enable SSE stream
+  previewEnabled?: boolean;       // show preview panel before applying
+  previewType?: 'anchored' | 'modal'; // preview panel type
+  mruLimit?: number;              // 最近使用数量（AI 子菜单）
+}
+
+export interface AIActionItem {
+  id: string;                     // stable id
+  name: string;                   // 菜单显示名
+  icon?: string;                  // 图标名（兼容性不确定时建议留空或用现有 glyph）
+  template: string;               // 用户消息模版，含 {selection}
+  apply: 'replace' | 'insert' | 'quote' | 'code';    // 结果落地方式
 }
 
 export const DEFAULT_SETTINGS: cMenuSettings = {
@@ -102,4 +129,36 @@ export const DEFAULT_SETTINGS: cMenuSettings = {
   cMenuTableGapMin: 10,
   cMenuTableGapAbove: 6,
   cMenuUseStartRectVertical: false,
+  // AI defaults (DeepSeek)
+  ai: {
+    provider: 'deepseek',
+    baseUrl: 'https://api.deepseek.com',
+    apiKey: '',
+    model: 'deepseek-chat',
+    systemPrompt: 'You are a helpful writing assistant. Keep output in Markdown, concise and clear. Do not add explanations unless asked.',
+    timeoutMs: 30000,
+    temperature: 0.7,
+    maxTokens: 800,
+    stream: false,
+    previewEnabled: true,
+    previewType: 'anchored',
+    mruLimit: 6,
+  },
+  // 默认 AI 子菜单动作
+  aiActions: [
+    {
+      id: 'ai_optimize',
+      name: '优化',
+      icon: 'bot-glyph',
+      template: '请对以下内容进行优化润色，保持原意，尽量简洁清晰:\n\n{selection}',
+      apply: 'replace',
+    },
+    {
+      id: 'ai_continue',
+      name: '续写',
+      icon: 'pencil',
+      template: '请基于以下上下文自然续写一段，风格保持一致:\n\n{selection}',
+      apply: 'insert',
+    },
+  ],
 };
